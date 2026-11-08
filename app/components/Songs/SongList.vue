@@ -50,6 +50,16 @@
           </div>
 
           <div class="mobile-tab-actions">
+            <select
+              v-model="sortBy"
+              aria-label="歌曲排序方式"
+              class="song-sort-select"
+              title="歌曲排序方式"
+            >
+              <option value="popularity">按热度</option>
+              <option value="date">按投稿时间</option>
+            </select>
+
             <!-- 学期选择器 -->
             <div v-if="availableSemesters.length > 1" class="semester-selector-compact">
               <button
@@ -163,6 +173,16 @@
             >
             <span class="search-icon">🔍</span>
           </div>
+
+          <select
+            v-model="sortBy"
+            aria-label="歌曲排序方式"
+            class="song-sort-select"
+            title="歌曲排序方式"
+          >
+            <option value="popularity">按热度</option>
+            <option value="date">按投稿时间</option>
+          </select>
 
           <!-- 学期选择器 -->
           <div v-if="availableSemesters.length > 1" class="semester-selector-compact">
@@ -775,6 +795,11 @@ watch(semesterUpdateEvent, async () => {
 
 // 监听搜索查询变化，重置分页
 watch(searchQuery, () => {
+  currentPage.value = 1
+})
+
+// 切换排序方式后回到第一页，避免停留在超出新排序结果范围的页码
+watch(sortBy, () => {
   currentPage.value = 1
 })
 
@@ -1865,6 +1890,25 @@ const vRipple = {
   gap: 0.75rem;
 }
 
+/* 歌曲列表排序选择器 */
+.song-sort-select {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 0 30px 0 10px;
+  color: var(--overlay-80);
+  background: var(--panel-bg);
+  border: 1px solid var(--overlay-16);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.song-sort-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
 /* 紧凑型学期选择器样式 */
 .semester-selector-compact {
   position: relative;
@@ -2693,6 +2737,17 @@ button:disabled {
     width: 100%;
     justify-content: space-between;
     gap: 8px;
+  }
+
+  .song-sort-select {
+    min-height: 40px;
+    max-width: 116px;
+    padding-left: 8px;
+    padding-right: 22px;
+    border-radius: 12px;
+    background: var(--chip-bg);
+    border-color: var(--chip-border);
+    font-size: 12px;
   }
 
   .search-box {
