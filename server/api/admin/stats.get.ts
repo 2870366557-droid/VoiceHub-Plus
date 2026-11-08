@@ -14,7 +14,7 @@ const BEIJING_TIMEZONE = 'Asia/Shanghai'
 export default defineEventHandler(async (event) => {
   // 检查认证和权限
   const user = event.context.user
-  if (!user || !['SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
+  if (!user || !['SONG_ADMIN', 'BROADCASTER', 'ADMIN', 'SUPER_ADMIN'].includes(user.role)) {
     throw createError({
       statusCode: 403,
       message: '需要管理员权限'
@@ -356,7 +356,7 @@ export default defineEventHandler(async (event) => {
     }
 
     return result
-  } catch (error) {
+  } catch (error: any) {
     console.error('获取统计数据失败:', error)
     throw createError({
       statusCode: 500,

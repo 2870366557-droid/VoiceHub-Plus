@@ -1,3 +1,5 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 <template>
   <div class="space-y-6">
     <form class="space-y-5" @submit.prevent="handleChangePassword">
@@ -178,6 +180,8 @@
         <span class="text-xs text-success font-medium">{{ success }}</span>
       </div>
 
+      <TurnstileWidget v-if="showTurnstile" ref="turnstileRef" v-model="turnstileToken" />
+
       <button
         :disabled="loading || !isFormValid"
         class="w-full flex items-center justify-center gap-2 py-3 bg-primary-hover hover:bg-primary text-text-primary text-sm font-black rounded-xl shadow-lg shadow-[var(--primary-glow)] transition-all active:scale-[0.98] disabled:opacity-50"
@@ -202,6 +206,7 @@ import {
   AlertCircle,
   Loader2
 } from '@lucide/vue'
+import TurnstileWidget from './TurnstileWidget.vue'
 import { useLocale } from '~/utils/locale'
 import { usePasswordStrength } from '~/composables/usePasswordStrength'
 import { validateInitialPasswordPolicy, validatePasswordPolicy } from '~/utils/password-policy'
@@ -215,10 +220,12 @@ const props = defineProps({
 })
 
 const auth = useAuth()
+const permissions = usePermissions()
 const router = useRouter()
 const { auth: authLocale } = useLocale()
 const locale = computed(() => authLocale.value?.changePasswordForm || {})
 const { localize: localizeServerError } = useServerErrors()
+const { captchaEnabled, captchaProvider, turnstileSiteKey } = useSiteConfig()
 
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -226,6 +233,12 @@ const confirmPassword = ref('')
 const error = ref('')
 const success = ref('')
 const loading = ref(false)
+const turnstileToken = ref('')
+const turnstileRef = ref(null)
+
+const showTurnstile = computed(
+  () => !props.isFirstLogin && captchaEnabled.value && captchaProvider.value === 'turnstile' && !!turnstileSiteKey.value
+)
 let redirectTimer = null
 
 const scheduleRedirect = (callback) => {
@@ -300,14 +313,14 @@ const handleChangePassword = async () => {
 
       // 密码设置完成后跳转
       scheduleRedirect(async () => {
-        if (auth.isAdmin.value) {
+        if (permissions.canAccessAdmin.value) {
           router.replace('/dashboard')
         } else {
           router.replace('/')
         }
       })
     } else {
-      await auth.changePassword(currentPassword.value, newPassword.value)
+      await auth.changePassword(currentPassword.value, newPassword.value, turnstileToken.value)
       success.value = locale.value.changeSuccess
 
       resetForm()
@@ -321,6 +334,8 @@ const handleChangePassword = async () => {
   } catch (err) {
     // 统一按错误码本地化服务端错误，未命中再回退到默认文案
     error.value = localizeServerError(err, locale.value.failed)
+    turnstileToken.value = ''
+    turnstileRef.value?.reset()
   } finally {
     loading.value = false
   }

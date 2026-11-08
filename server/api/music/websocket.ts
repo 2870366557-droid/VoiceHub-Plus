@@ -1,4 +1,7 @@
-import { defineEventHandler, getQuery } from 'h3'
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+import { randomUUID } from 'node:crypto'
+import { defineEventHandler, getCookie, getQuery } from 'h3'
 import { db, users } from '~/drizzle/db'
 import { eq } from 'drizzle-orm'
 import { JWTEnhanced } from '~~/server/utils/jwt-enhanced'
@@ -7,6 +10,8 @@ import { createApiError } from '~~/server/utils/apiError'
 
 // 存储WebSocket连接
 const musicConnections = new Map<string, any>()
+// 单实例连接上限：每个连接都占用 socket 与心跳定时器，匿名端不可无限制开流
+const MAX_MUSIC_CONNECTIONS = 500
 
 // 音乐状态接口
 interface MusicState {
@@ -37,7 +42,7 @@ export function broadcastMusicState(state: MusicState) {
       }
 
       connection.write(`data: ${message}\n\n`)
-    } catch (error) {
+    } catch (error: any) {
       // 忽略常见的连接错误，避免日志污染
       if (error.code !== 'ECONNRESET' && error.code !== 'EPIPE' && error.code !== 'ENOTFOUND') {
         console.error(`Failed to send music state to connection ${id}:`, error.message)
@@ -67,7 +72,7 @@ export function broadcastPlaylistUpdate(playlist: any[]) {
       }
 
       connection.write(`data: ${message}\n\n`)
-    } catch (error) {
+    } catch (error: any) {
       if (error.code !== 'ECONNRESET' && error.code !== 'EPIPE' && error.code !== 'ENOTFOUND') {
         console.error(`Failed to send playlist update to connection ${id}:`, error.message)
       }
@@ -95,7 +100,7 @@ export function broadcastSongChange(songInfo: any) {
       }
 
       connection.write(`data: ${message}\n\n`)
-    } catch (error) {
+    } catch (error: any) {
       if (error.code !== 'ECONNRESET' && error.code !== 'EPIPE' && error.code !== 'ENOTFOUND') {
         console.error(`Failed to send song change to connection ${id}:`, error.message)
       }
@@ -110,7 +115,10 @@ export function broadcastSongChange(songInfo: any) {
 export default defineEventHandler(async (event) => {
   // 获取查询参数
   const query = getQuery(event)
-  const token = query.token as string
+  // 优先从 auth-token cookie 取令牌：EventSource 同源请求自动携带 cookie。
+  // query.token 仅为兼容旧客户端保留。2026-10-23 安全加固：JWT 不放 URL，
+  // 避免令牌落入 Nginx 访问日志与 Referer。
+  const token = (getCookie(event, 'auth-token') as string) || (query.token as string)
 
   // 验证token（可选，根据需要决定是否需要认证）
   let userId: number | null = null
@@ -141,7 +149,7 @@ export default defineEventHandler(async (event) => {
       } else {
         console.warn('音乐 SSE 连接会话已失效，降级为匿名连接')
       }
-    } catch (error) {
+    } catch (error: any) {
       if (error && typeof error === 'object' && 'statusCode' in error) {
         throw error
       }
@@ -150,8 +158,12 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  if (musicConnections.size >= MAX_MUSIC_CONNECTIONS) {
+    throw createApiError(503, 'MUSIC_CONNECTIONS_FULL', '实时状态连接数已满，请稍后重试')
+  }
+
   // 生成连接ID
-  const connectionId = `music_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  const connectionId = `music_${randomUUID()}`
 
   // 设置SSE头
   const response = event.node.res
@@ -227,7 +239,7 @@ export default defineEventHandler(async (event) => {
           data: { timestamp: Date.now() }
         })}\n\n`
       )
-    } catch (error) {
+    } catch (error: any) {
       // 忽略常见的连接错误
       if (error.code !== 'ECONNRESET' && error.code !== 'EPIPE') {
         console.error(`Heartbeat failed for connection ${connectionId}:`, error.message)

@@ -1,8 +1,15 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { getClientIP } from '~~/server/utils/ip-utils'
 import { createApiError } from '~~/server/utils/apiError'
+import {
+  getEmailDomain,
+  getEmailDomainViolation,
+  isAllowedPersonalEmail
+} from '~~/server/utils/email-domain-policy'
 
 export default defineEventHandler(async (event) => {
   // 检查请求方法
@@ -31,6 +38,17 @@ export default defineEventHandler(async (event) => {
       throw createApiError(400, 'USER_EMAIL_ALREADY_VERIFIED', '邮箱已验证，无需重新发送')
     }
 
+    // 历史遗留的非主流邮箱：不再静默成功，直接提示更换邮箱，避免用户反复重发收不到
+    if (!isAllowedPersonalEmail(currentUser.email)) {
+      console.warn(`[email-policy] blocked resend for domain: ${getEmailDomain(currentUser.email) || 'invalid'}`)
+      const violation = getEmailDomainViolation(currentUser.email)
+      throw createApiError(
+        400,
+        violation?.code || 'AUTH_EMAIL_DOMAIN_NOT_ALLOWED',
+        violation?.message || '当前绑定的邮箱不在支持范围内，请先更换主流邮箱'
+      )
+    }
+
     // 发送邮箱验证码
     try {
       const { sendEmailVerificationCode } = await import('~~/server/api/user/email/send-code.post')
@@ -39,7 +57,7 @@ export default defineEventHandler(async (event) => {
       await sendEmailVerificationCode(currentUser.id, currentUser.email, currentUser.name, clientIP)
 
       return { success: true, message: '验证码已重新发送' }
-    } catch (emailError) {
+    } catch (emailError: any) {
       console.error('发送邮箱验证码失败:', emailError)
       throw createApiError(500, 'USER_CODE_SEND_FAILED', '发送验证码失败，请稍后重试')
     }

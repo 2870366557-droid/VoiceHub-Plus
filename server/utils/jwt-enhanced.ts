@@ -1,3 +1,5 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import jwt from 'jsonwebtoken'
 import { randomUUID } from 'node:crypto'
 
@@ -16,8 +18,8 @@ export interface JWTPayload {
  */
 export class JWTEnhanced {
   private static readonly JWT_SECRET = process.env.JWT_SECRET as string
-  private static readonly TOKEN_EXPIRES = '7d' // 7天有效期
-  private static readonly REFRESH_THRESHOLD = 24 * 60 * 60 // 24小时（秒），剩余时间少于此值时自动续期
+  private static readonly TOKEN_EXPIRES = '6h'
+  private static readonly REFRESH_THRESHOLD = 0
 
   static hasCurrentTokenVersion(
     payload: { tokenVersion?: unknown } | null | undefined,
@@ -117,7 +119,7 @@ export class JWTEnhanced {
     try {
       const decoded = jwt.decode(token) as JWTPayload
       return decoded && decoded.userId ? decoded : null
-    } catch (error) {
+    } catch (error: any) {
       return null
     }
   }
@@ -198,7 +200,7 @@ export class JWTEnhanced {
         valid: true,
         payload
       }
-    } catch (error) {
+    } catch (error: any) {
       return {
         valid: false
       }

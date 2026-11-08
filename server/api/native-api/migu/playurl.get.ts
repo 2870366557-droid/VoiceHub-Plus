@@ -1,3 +1,5 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 // 将 PQ 基础链接的路径替换为高音质资源路径
 function upgradeUrl(url: string, quality: string) {
   let upgraded = url
@@ -33,10 +35,19 @@ const QUALITY_FALLBACK_CHAIN: Record<string, string[]> = {
 }
 
 /**
- * HEAD 探测链接可用性，探测失败时保守视为可用，避免误降级
+ * HEAD 探测链接可用性，探测失败时保守视为可用，避免误降级。
+ * 2026-10-23 安全加固：探测目标来自上游响应（二阶输入），限定为咪咕官方域名，
+ * 非白名单主机直接跳过探测（保守视为可用，不影响播放——播放在客户端进行），
+ * 关闭借上游响应让服务端盲打内网地址的二阶 SSRF。
  */
+const PROBE_ALLOWED_HOST_SUFFIXES = ['.migu.cn', 'migu.cn']
+
 async function isUrlAvailable(url: string): Promise<boolean> {
   try {
+    const host = new URL(url).hostname.toLowerCase().replace(/\.$/, '')
+    if (!PROBE_ALLOWED_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(suffix))) {
+      return true
+    }
     const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) })
     return res.ok
   } catch {
@@ -114,7 +125,8 @@ export default defineEventHandler(async (event) => {
       'location-info': '',
     }, baseUrl = 'http://c.musicapp.migu.cn', strategyU = '/listen-url/h5',
     // 匿名请求上游仅提供基础音质，固定以 PQ 取链后再本地升级路径
-    params = `contentId=${contentId}&copyrightId=&resourceType=2&netType=01&toneFlag=PQ&scene=&lowerQualityContentId=${contentId}`;
+    encodedContentId = encodeURIComponent(contentId),
+    params = `contentId=${encodedContentId}&copyrightId=&resourceType=2&netType=01&toneFlag=PQ&scene=&lowerQualityContentId=${encodedContentId}`;
     const res = await fetch(
       `${baseUrl}/strategy${strategyU}/v2.4?${params}`
       ,{headers}

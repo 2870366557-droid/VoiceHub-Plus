@@ -1,5 +1,8 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import { navigateTo, useState } from '#app'
-import type { User } from '~/types'
+import type { User } from '~~/types'
 import { useUserFilters } from '~/composables/useUserFilters'
 import { useServerErrors } from '~/composables/useLocaleText'
 
@@ -153,17 +156,17 @@ export const useAuth = () => {
 
     try {
       await refreshUser()
-    } catch (error) {
+    } catch (error: any) {
       console.warn(refreshFailureMessage, error)
     }
   }
 
-  const changePassword = async (currentPassword: string, newPassword: string) => {
+  const changePassword = async (currentPassword: string, newPassword: string, turnstileToken = '') => {
     loading.value = true
     try {
       const response = await $fetch<PasswordChangeResponse>('/api/auth/change-password', {
         method: 'POST',
-        body: { currentPassword, newPassword }
+        body: { currentPassword, newPassword, turnstileToken }
       })
       await syncPasswordChangeState(response, '密码修改成功，但刷新用户状态失败:')
     } catch (error: any) {
@@ -189,7 +192,7 @@ export const useAuth = () => {
   const logout = async (redirect = true) => {
     try {
       await $fetch('/api/auth/logout', { method: 'POST' })
-    } catch (error) {
+    } catch (error: any) {
       // 忽略登出错误
     }
 
@@ -199,7 +202,7 @@ export const useAuth = () => {
     try {
       const { resetUserFilters } = useUserFilters()
       resetUserFilters()
-    } catch (e) {
+    } catch (e: any) {
       // ignore
     }
 
@@ -237,6 +240,7 @@ export const useAuth = () => {
     setInitialPassword,
     refreshUser,
     initAuth,
+    setAuthState,
     getToken,
     getAuthConfig
   }

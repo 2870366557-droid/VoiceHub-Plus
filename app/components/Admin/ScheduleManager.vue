@@ -1,3 +1,8 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+<!--
+Modified by YH-Chen on 2026-10-17
+-->
 <template>
   <div class="space-y-6 pb-24 md:pb-8">
     <!-- 日期选择器 -->
@@ -1553,6 +1558,23 @@
           </div>
 
           <div>
+            <label class="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-1.5">
+              {{ t.scheduleHeat.label }} · {{ autoScheduleHeatWeight }}%
+            </label>
+            <input
+              v-model.number="autoScheduleHeatWeight"
+              class="w-full accent-[var(--primary)]"
+              max="100"
+              min="0"
+              step="5"
+              type="range"
+            >
+            <p class="mt-1.5 text-[10px] text-text-tertiary leading-relaxed">
+              {{ t.scheduleHeat.hint(autoScheduleHeatWeight) }}
+            </p>
+          </div>
+
+          <div>
             <label class="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-1.5">{{ locale.scheduleAlgorithm }}</label>
             <div class="flex gap-2">
               <button
@@ -1894,6 +1916,7 @@ import { useLocale } from '~/utils/locale'
 import { useServerErrors } from '~/composables/useLocaleText'
 import { formatDuration, addDaysToString, getDaysBetween } from '~/utils/timeUtils'
 import { autoSchedule, autoScheduleExhaustive, poolCandidateFromItem } from '~/utils/autoSchedule'
+import { useNewUi } from '~/composables/useNewUi'
 import { getMusicUrlResult, isKnownInvalidQqAudioUrl } from '~/utils/musicUrl'
 
 import SchedulePlaylistFilterModal from './SchedulePlaylistFilterModal.vue'
@@ -2010,6 +2033,7 @@ const songSortOption = ref('votes-desc')
 const hasChanges = ref(false)
 const searchQuery = ref('')
 const selectedGrade = ref('')
+const t = useNewUi()
 const activeTab = ref('normal')
 const mobileTab = ref('pending')
 const mobileFiltersOpen = ref(false)
@@ -2328,6 +2352,14 @@ const autoScheduleTargetMinutes = ref(null)
 const autoScheduleTargetSongCount = ref(null)
 const autoScheduleTargetRequesterCount = ref(null)
 const autoScheduleDirection = ref('under')
+/** 热度加权随机的热度权重（%）：80 = 80% 看热度、20% 随机（默认值，可在界面随时调） */
+const autoScheduleHeatWeight = ref(80)
+/** 转成 0~1，并夹在合理范围内 */
+const heatWeightRatio = () => {
+  const value = Number(autoScheduleHeatWeight.value)
+  if (!Number.isFinite(value)) return 0.8
+  return Math.min(1, Math.max(0, value / 100))
+}
 const autoScheduleFixExisting = ref(false)
 const autoScheduleResult = ref({ songs: [], totalDuration: 0, diff: 0, absDiff: 0 })
 const autoSchedulePlans = ref([])
@@ -4127,7 +4159,7 @@ const runAutoSchedule = () => {
   const targetRequesterCount = Number.isFinite(autoScheduleTargetRequesterCount.value) && autoScheduleTargetRequesterCount.value > 0
     ? Math.floor(autoScheduleTargetRequesterCount.value)
     : null
-  const results = fn(autoScheduleDirection.value, autoScheduleTargetMinutes.value, candidates, preSelected, 10, targetSongCount, targetRequesterCount)
+  const results = fn(autoScheduleDirection.value, autoScheduleTargetMinutes.value, candidates, preSelected, 10, targetSongCount, targetRequesterCount, heatWeightRatio())
   const plansArray = Array.isArray(results) ? results : [results]
   const first = plansArray[0]
   if (!first || first.songs.length === 0) {
@@ -4159,7 +4191,7 @@ const generateMorePlans = async () => {
   const targetRequesterCount = Number.isFinite(autoScheduleTargetRequesterCount.value) && autoScheduleTargetRequesterCount.value > 0
     ? Math.floor(autoScheduleTargetRequesterCount.value)
     : null
-  const results = fn(autoScheduleDirection.value, autoScheduleTargetMinutes.value, candidates, preSelected, requestCount, targetSongCount, targetRequesterCount)
+  const results = fn(autoScheduleDirection.value, autoScheduleTargetMinutes.value, candidates, preSelected, requestCount, targetSongCount, targetRequesterCount, heatWeightRatio())
   const plansArray = Array.isArray(results) ? results : [results]
   const existingKeys = new Set(autoSchedulePlans.value.map((p) => p.songs.map((s) => s.id).sort().join(',')))
   let addedCount = 0
@@ -4699,14 +4731,19 @@ const markAllAsPlayed = async () => {
     try {
       const songIds = localScheduledSongs.value.map((s) => s.song.id)
 
-      await $fetch('/api/admin/songs/mark-played', {
+      const result = await $fetch('/api/admin/songs/mark-played', {
         method: 'POST',
         body: { songIds },
         ...auth.getAuthConfig()
       })
 
       if (window.$showNotification) {
-        window.$showNotification(locale.value.messages.allMarkedPlayed, 'success')
+        // 广播站标记未来场次时服务端会跳过并说明原因
+        if (result?.skipped > 0 && result?.message) {
+          window.$showNotification(result.message, 'info')
+        } else {
+          window.$showNotification(locale.value.messages.allMarkedPlayed, 'success')
+        }
       }
 
       // 重新加载数据
@@ -4714,7 +4751,7 @@ const markAllAsPlayed = async () => {
     } catch (err) {
       console.error('标记播放失败:', err)
       if (window.$showNotification) {
-        window.$showNotification(locale.value.errors.operationFailed, 'error')
+        window.$showNotification(err?.data?.message || locale.value.errors.operationFailed, 'error')
       }
     } finally {
       loading.value = false

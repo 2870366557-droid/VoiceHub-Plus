@@ -13,12 +13,18 @@ export interface OAuthState {
 
 export const getSafeOAuthReturnPath = (value: unknown): string | undefined => {
   const path = Array.isArray(value) ? value[0] : value
-  return typeof path === 'string' &&
-    path.startsWith('/') &&
-    !path.startsWith('//') &&
-    !path.startsWith('/\\')
-    ? path
-    : undefined
+  if (typeof path !== 'string' || !path.startsWith('/')) return undefined
+  // 控制字符与反斜杠会被浏览器归一化，可能把站内路径变成协议相对地址
+  if (/[\u0000-\u001f\u007f\\]/.test(path)) return undefined
+
+  try {
+    const base = 'https://voicehub.invalid'
+    const url = new URL(path, base)
+    if (url.origin !== base) return undefined
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return undefined
+  }
 }
 
 const normalizePort = (url: URL): string => {
@@ -265,7 +271,7 @@ export const parseState = (
             return null
           }
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error('Failed to parse OAuth state URLs', e)
         return null
       }

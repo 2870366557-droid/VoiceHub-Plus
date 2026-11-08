@@ -1,8 +1,11 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import bcrypt from 'bcryptjs'
 import { getRequestHeader } from 'h3'
-import { eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db, users } from '~/drizzle/db'
-import { JWTEnhanced } from '~~/server/utils/jwt-enhanced'
+import { createAuthSession } from '~~/server/utils/auth-session'
 import { validateOAuthRegisterCredentials } from '~/utils/oauth-register'
 import { isSecureRequest, getRequestHostname } from '~~/server/utils/request-utils'
 import { resolveEsaCaptchaSceneId } from '~/utils/esaCaptcha'
@@ -12,13 +15,15 @@ import { getClientIP } from '~~/server/utils/ip-utils'
 import { checkDistributedRateLimit } from '~~/server/utils/rateLimiter'
 import { getServerDate, getServerTimestamp } from '~~/server/utils/serverTime'
 import { verifyAndConsumeCaptcha } from '~~/server/utils/captcha'
-import { resolveGradeClassError, REMARK_MAX_LENGTH } from '~~/server/utils/register-validation'
+import { resolveGradeClassError, REMARK_MAX_LENGTH, validateRealName, maskUsernameForDuplicateHint } from '~~/server/utils/register-validation'
 import { isGradeClassValid } from '~~/server/utils/grade-class-options'
 import { verifyEmailCode } from '~~/server/utils/email-verification'
+import { getEmailDomainViolation } from '~~/server/utils/email-domain-policy'
 import { notifyRegistration } from '~~/server/utils/registration-notify'
 import { resolveRegisteredLegalConsentVersion } from '~~/server/utils/legal-consent'
 
-const REGISTER_RATE_LIMIT = 5
+// 本站按校园网 NAT 实际情况放开注册 IP 限流（原值 5 次/小时：多个学生共享同一出口 IP 会被秒光）
+const REGISTER_RATE_LIMIT = 1000000
 const REGISTER_RATE_WINDOW_MS = 60 * 60 * 1000
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -29,7 +34,7 @@ export default defineEventHandler(async (event) => {
   // 数据库连接检查（在读取配置前执行，DB 故障时返回明确的 503 兜底）
   try {
     await db.select().from(users).limit(1)
-  } catch (error) {
+  } catch (error: any) {
     console.error('Database connection error:', error)
     throw createApiError(503, SERVER_ERROR_CODES.AUTH_DATABASE_UNAVAILABLE, '数据库服务暂时不可用')
   }
@@ -139,6 +144,13 @@ export default defineEventHandler(async (event) => {
   if (email && !EMAIL_REGEX.test(email)) {
     throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, '请输入有效的邮箱地址')
   }
+  // 域名策略：仅主流邮箱、禁一次性邮箱（发码环节已拦，这里再兜一层防绕过）
+  if (email) {
+    const domainViolation = getEmailDomainViolation(email)
+    if (domainViolation) {
+      throw createApiError(400, domainViolation.code, domainViolation.message)
+    }
+  }
 
   if (remark.length > REMARK_MAX_LENGTH) {
     throw createApiError(400, SERVER_ERROR_CODES.COMMON_INVALID_PARAMS, `备注不能超过 ${REMARK_MAX_LENGTH} 个字符`)
@@ -151,6 +163,12 @@ export default defineEventHandler(async (event) => {
   )
   if (gradeClassError) {
     throw createApiError(400, gradeClassError.code, gradeClassError.message)
+  }
+
+  // 真实姓名必须中文（本站要求与学籍一致的姓名，避免昵称/英文名混入）
+  const realNameError = validateRealName(name)
+  if (realNameError) {
+    throw createApiError(400, realNameError.code, realNameError.message)
   }
 
   if (selectedGrade && selectedClass) {
@@ -173,6 +191,43 @@ export default defineEventHandler(async (event) => {
   // 邮箱验证码在最后校验（此时用户名等前置校验均已通过，失败即消费不会误烧码）
   if (email && !(await verifyEmailCode(email, emailCode))) {
     throw createApiError(400, SERVER_ERROR_CODES.AUTH_EMAIL_CODE_INVALID, '邮箱验证码无效或已过期，请重新获取')
+  }
+
+  // 邮箱唯一：一个邮箱只能绑定一个账号（不区分大小写），否则找回密码会互相串号
+  if (email) {
+    const emailOwner = await db
+      .select({ id: users.id, username: users.username })
+      .from(users)
+      .where(sql`lower(${users.email}) = ${email} and btrim(coalesce(${users.email}, '')) <> ''`)
+      .limit(1)
+    if (emailOwner.length > 0) {
+      throw createApiError(409, 'AUTH_EMAIL_TAKEN', '该邮箱已被其他账号绑定，请换一个邮箱或直接登录原账号')
+    }
+  }
+
+  // 同班同名：同年级同班级已经有同名同学时，先询问「是不是忘记密码了」，
+  // 由学生显式确认「不是我」后（confirmNotMe）才继续建号，避免同一人重复注册。
+  if (name && selectedGrade && selectedClass && body.confirmNotMe !== true) {
+    const sameNameClass = await db
+      .select({ username: users.username, email: users.email })
+      .from(users)
+      .where(
+        and(
+          eq(users.name, name),
+          eq(users.grade, selectedGrade),
+          eq(users.class, selectedClass),
+          inArray(users.status, ['active', 'pending'])
+        )
+      )
+      .limit(1)
+
+    if (sameNameClass.length > 0) {
+      throw createApiError(409, 'AUTH_NAME_CLASS_DUPLICATE', '同班已有同名同学，请确认是否本人', {
+        params: [maskUsernameForDuplicateHint(sameNameClass[0].username)],
+        // 前端据此决定「去重置密码」按钮是否可用（没绑邮箱就无法自助重置）
+        hasEmail: Boolean(sameNameClass[0].email)
+      })
+    }
   }
 
   const requiresApproval = Boolean(config?.registerRequiresApproval)
@@ -199,7 +254,10 @@ export default defineEventHandler(async (event) => {
         createdAt: now,
         updatedAt: now,
         passwordChangedAt: now,
-        lastLogin: now,
+        // 注册 ≠ 登录：需审核的账号不签发登录态，绝不能把注册时间写成「最后登录」
+        // （2026-10-11 修正：此前会让后台把「注册未登录」误判为已登录，且永远没有 IP）
+        lastLogin: requiresApproval ? null : now,
+        lastLoginIp: requiresApproval ? null : clientIp,
         forcePasswordChange: false,
         legalConsentVersion: legalConsentVersion || null,
         legalConsentAt: legalConsentVersion ? now : null
@@ -212,8 +270,8 @@ export default defineEventHandler(async (event) => {
     }
 
     // 需要审核：不签发登录态，等待管理员审核
-    // 注册通知（异步，不阻塞主流程）
-    void notifyRegistration(insertedUser.id, username, name, email, requiresApproval)
+    // 注册通知：待审核时通知管理员，失败不影响注册结果
+    await notifyRegistration(username, name, email, requiresApproval, { grade: selectedGrade, class: selectedClass })
 
     if (requiresApproval) {
       return {
@@ -222,15 +280,27 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // 无需审核：直接登录
-    const token = JWTEnhanced.generateToken(insertedUser.id, 'USER', insertedUser.tokenVersion)
+    // 无需审核：直接登录，令牌必须绑定可撤销的会话
+    let token: string
+    try {
+      const session = await createAuthSession(
+        event,
+        { id: insertedUser.id, role: 'USER', tokenVersion: insertedUser.tokenVersion },
+        'password'
+      )
+      token = session.token
+    } catch (error) {
+      // 会话创建失败时回滚刚创建的用户，避免留下无法登录且重试报"用户名已存在"的半成品账号
+      await db.delete(users).where(eq(users.id, insertedUser.id)).catch(() => {})
+      throw error
+    }
     const isSecure = isSecureRequest(event)
 
     setCookie(event, 'auth-token', token, {
       httpOnly: true,
       secure: isSecure,
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7天
+      maxAge: 60 * 60 * 6, // 6小时
       path: '/'
     })
 

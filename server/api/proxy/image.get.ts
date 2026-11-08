@@ -3,48 +3,38 @@ import { lookup } from 'node:dns/promises'
 import { lookup as dnsLookup } from 'node:dns'
 import http from 'node:http'
 import https from 'node:https'
+import { publicAddress } from '~~/server/utils/music-source-plugins/network'
+import { getServerTimestamp } from '~~/server/utils/serverTime'
+import { isServerlessRuntime } from '~~/server/utils/serverless-runtime'
+import { detectImageFormat, imageFormatToMimeType } from '~~/server/utils/imageSecurity'
+import { getClientIP } from '~~/server/utils/ip-utils'
+import { checkDistributedRateLimit } from '~~/server/utils/rateLimiter'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MAX_CONCURRENT_IMAGE_FETCHES = 30
+// 并发上限是进程内计数，多实例之间不共享：Serverless 下压到 4，超载立即 429 而不是各占一个实例直到平台超时
+const IS_SERVERLESS = isServerlessRuntime()
+const MAX_CONCURRENT_IMAGE_FETCHES = IS_SERVERLESS ? 4 : 30
 const MAX_REDIRECTS = 5
+const REQUEST_TIMEOUT_MS = 15000
+// Serverless 下单次代理的整体截止时间，跨重定向、重试与响应体读取共享；自建部署不设截止（大封面合法地需要上百秒）
+const IMAGE_FETCH_DEADLINE_MS = 8000
+const PROXY_DEADLINE_UNLIMITED = Number.POSITIVE_INFINITY
+// 剩余预算低于一次握手的耗时就不再重试
+const RETRY_MIN_BUDGET_MS = 1500
 let activeImageFetches = 0
 
-const isBlockedIPv4 = (address) => {
-  const parts = address.split('.').map(Number)
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return true
-  const [first, second] = parts
-  return (
-    first === 0 || first === 10 || first === 127 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && (second === 0 || second === 168)) ||
-    (first === 100 && second >= 64 && second <= 127) ||
-    (first === 203 && second === 0) ||
-    first >= 224
-  )
+// 超时单独成类：重试策略按类型判断，不依赖用户可见文案
+class ImageFetchTimeoutError extends Error {
+  constructor() {
+    super('图片请求超时')
+    this.name = 'ImageFetchTimeoutError'
+  }
 }
 
-const isBlockedIPv6 = (address) => {
-  const n = address.toLowerCase()
-  // IPv4-mapped IPv6
-  if (n.startsWith('::ffff:')) return isBlockedIPv4(n.replace('::ffff:', ''))
-  // ::1 (loopback)
-  if (n === '::1') return true
-  // fe80::/10 (link-local)
-  if (n.startsWith('fe8') || n.startsWith('fe9') || n.startsWith('fea') || n.startsWith('feb')) return true
-  // fc00::/7 (unique local)
-  if (n.startsWith('fc') || n.startsWith('fd')) return true
-  return false
-}
+// 内网/保留地址判定复用插件网络层的 ipaddr.js unicast 实现（同一份 IP 名单）
+const isBlockedAddress = (address: string) => !publicAddress(address)
 
-const isBlockedAddress = (address) => {
-  const ver = isIP(address)
-  if (ver === 4) return isBlockedIPv4(address)
-  if (ver === 6) return isBlockedIPv6(address)
-  return true
-}
-
-const validateUrl = async (url) => {
+const validateUrl = async (url: URL) => {
   if (url.username || url.password) {
     throw createError({ statusCode: 400, message: '图片URL不能包含用户名或密码' })
   }
@@ -75,7 +65,7 @@ const validateUrl = async (url) => {
   }
 }
 
-const getReferer = (hostname) => {
+const getReferer = (hostname: string) => {
   const h = hostname.toLowerCase()
   if (h === 'hdslb.com' || h.endsWith('.hdslb.com')) return 'https://www.bilibili.com/'
   if (
@@ -92,7 +82,7 @@ const getReferer = (hostname) => {
 
 // 连接时 DNS 校验：作为 http/https 请求的自定义 lookup，确保实际连接的 IP 与校验的 IP 一致，
 // 彻底关闭 DNS 重绑定（DNS Rebinding）窗口
-const secureLookup = (hostname, options, callback) => {
+const secureLookup = (hostname: string, options: any, callback: (...args: any[]) => void) => {
   dnsLookup(hostname, options, (err, address, family) => {
     if (err) {
       callback(err)
@@ -110,8 +100,8 @@ const secureLookup = (hostname, options, callback) => {
 }
 
 // 发起单次请求（不自动跟随重定向），连接层使用 secureLookup 校验 IP
-const requestOnce = (targetUrl, headers, timeoutMs) => {
-  return new Promise((resolve, reject) => {
+const requestOnce = (targetUrl: string, headers: Record<string, string>, timeoutMs: number) => {
+  return new Promise<import('http').IncomingMessage>((resolve, reject) => {
     const url = new URL(targetUrl)
     const client = url.protocol === 'https:' ? https : http
     const req = client.request(
@@ -121,16 +111,20 @@ const requestOnce = (targetUrl, headers, timeoutMs) => {
     )
     req.on('error', reject)
     req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error('图片请求超时'))
+      req.destroy(new ImageFetchTimeoutError())
     })
     req.end()
   })
 }
 
-const fetchImage = async (imageUrl) => {
+const fetchImage = async (imageUrl: string, deadlineAt: number) => {
   let currentUrl = imageUrl
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
+    const remainingMs = deadlineAt - getServerTimestamp()
+    if (remainingMs <= 0) {
+      throw new ImageFetchTimeoutError()
+    }
     const url = new URL(currentUrl)
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new Error('不支持的协议')
@@ -145,7 +139,7 @@ const fetchImage = async (imageUrl) => {
       Referer: getReferer(url.hostname) || url.origin
     }
 
-    const res = await requestOnce(currentUrl, headers, 15000)
+    const res = await requestOnce(currentUrl, headers, Math.min(REQUEST_TIMEOUT_MS, remainingMs))
     const status = res.statusCode || 0
 
     // 手动处理重定向：下一跳目标会在循环顶部重新校验，避免自动跟随造成的 SSRF
@@ -175,16 +169,25 @@ const fetchImage = async (imageUrl) => {
       throw createError({ statusCode: 413, message: '图片文件过大' })
     }
 
+    // socket 超时只管空闲状态，上游缓慢吐字节挡不住，响应体读取同样按剩余预算兜底
+    const expireTimer = Number.isFinite(deadlineAt)
+      ? setTimeout(() => res.destroy(new ImageFetchTimeoutError()), Math.max(1, deadlineAt - getServerTimestamp()))
+      : undefined
+
     // 流式读取，防止恶意服务器通过缺失或伪造 content-length 导致内存耗尽
     let loaded = 0
     const chunks = []
-    for await (const chunk of res) {
-      loaded += chunk.length
-      if (loaded > MAX_IMAGE_BYTES) {
-        res.destroy()
-        throw createError({ statusCode: 413, message: '图片文件过大' })
+    try {
+      for await (const chunk of res) {
+        loaded += chunk.length
+        if (loaded > MAX_IMAGE_BYTES) {
+          res.destroy()
+          throw createError({ statusCode: 413, message: '图片文件过大' })
+        }
+        chunks.push(chunk)
       }
-      chunks.push(chunk)
+    } finally {
+      if (expireTimer) clearTimeout(expireTimer)
     }
     const buffer = Buffer.concat(chunks)
 
@@ -194,12 +197,13 @@ const fetchImage = async (imageUrl) => {
   throw new Error('重定向次数过多')
 }
 
-const retryFetchImage = async (imageUrl, maxRetries = 2) => {
+const retryFetchImage = async (imageUrl: string, deadlineAt: number, maxRetries = 2) => {
+  const hasDeadline = Number.isFinite(deadlineAt)
   let lastError
   for (let i = 0; i <= maxRetries; i++) {
     try {
-      return await fetchImage(imageUrl)
-    } catch (err) {
+      return await fetchImage(imageUrl, deadlineAt)
+    } catch (err: any) {
       lastError = err
       // 校验层面错误（400/403）重试无意义，直接中断
       if (
@@ -210,8 +214,22 @@ const retryFetchImage = async (imageUrl, maxRetries = 2) => {
       ) {
         throw err
       }
+      // 有截止时间时：超时重试只会把实例占用翻倍，剩余预算不够一次握手也不再重试
+      if (
+        hasDeadline &&
+        (err instanceof ImageFetchTimeoutError ||
+          deadlineAt - getServerTimestamp() < RETRY_MIN_BUDGET_MS)
+      ) {
+        throw err
+      }
       if (i < maxRetries) {
-        await new Promise((r) => setTimeout(r, 1000 * (i + 1)))
+        const delay = 1000 * (i + 1)
+        await new Promise((r) =>
+          setTimeout(
+            r,
+            hasDeadline ? Math.min(delay, Math.max(0, deadlineAt - getServerTimestamp() - 500)) : delay
+          )
+        )
       }
     }
   }
@@ -223,6 +241,16 @@ export default defineEventHandler(async (event) => {
 
   if (!imageUrl) throw createError({ statusCode: 400, message: '缺少图片URL参数' })
 
+  // 每 IP 限流：进程内并发上限在多实例下不共享，限流兜住跨实例放大
+  const rateLimit = await checkDistributedRateLimit(
+    `proxy_image:${getClientIP(event)}`,
+    12000,
+    60 * 1000
+  )
+  if (!rateLimit.isAllowed) {
+    throw createError({ statusCode: 429, message: '图片代理请求过多，请稍后重试' })
+  }
+
   if (activeImageFetches >= MAX_CONCURRENT_IMAGE_FETCHES) {
     throw createError({ statusCode: 429, message: '图片代理请求过多，请稍后重试' })
   }
@@ -230,14 +258,27 @@ export default defineEventHandler(async (event) => {
   activeImageFetches++
 
   try {
-    const { contentType, buffer } = await retryFetchImage(imageUrl)
+    const deadlineAt = IS_SERVERLESS
+      ? getServerTimestamp() + IMAGE_FETCH_DEADLINE_MS
+      : PROXY_DEADLINE_UNLIMITED
+    const { buffer } = await retryFetchImage(imageUrl, deadlineAt)
 
-    setHeader(event, 'Content-Type', contentType)
+    // 不信任上游声明的 Content-Type：只按魔数放行栅格图，杜绝 image/svg+xml 与 HTML 在本站源执行脚本
+    const format = detectImageFormat(buffer)
+    if (!format) {
+      throw createError({ statusCode: 415, message: '图片内容不合法，已拒绝代理' })
+    }
+
+    setHeader(event, 'Content-Type', imageFormatToMimeType(format))
+    setHeader(event, 'Content-Length', buffer.length)
+    setHeader(event, 'X-Content-Type-Options', 'nosniff')
+    setHeader(event, 'Content-Security-Policy', "default-src 'none'; sandbox")
+    setHeader(event, 'Content-Disposition', `inline; filename="image.${format}"`)
     setHeader(event, 'Cache-Control', 'public, max-age=3600')
     setHeader(event, 'Access-Control-Allow-Origin', '*')
 
     return new Uint8Array(buffer)
-  } catch (error) {
+  } catch (error: any) {
     if (error && typeof error === 'object' && 'statusCode' in error) {
       console.warn(`图片代理已拒绝 [${error.statusCode}]`, imageUrl, error.message)
       throw error

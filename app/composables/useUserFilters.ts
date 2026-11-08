@@ -1,5 +1,6 @@
+// Modified by YH-Chen on 2026-10-17
 import { computed, watch } from 'vue'
-import type { User } from '~/types'
+import type { User } from '~~/types'
 import { useAuth } from '~/composables/useAuth'
 import { smartSort } from '~/utils/gradeClassWeights'
 
@@ -38,7 +39,7 @@ export const useUserFilters = () => {
         }
         optionsLoaded.value = true
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('获取轻量级选项失败', e)
     }
   }

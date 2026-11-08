@@ -1,3 +1,8 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+<!--
+Modified by YH-Chen on 2026-10-17
+-->
 <!-- 侧边栏组件 -->
 <template>
   <aside
@@ -135,7 +140,19 @@ import {
   Database,
   Lock,
   Ticket,
-  GraduationCap
+  GraduationCap,
+  Megaphone,
+  ClipboardCheck,
+  UserCheck,
+  Activity,
+  ShieldAlert,
+  MessageSquare,
+  MessagesSquare,
+  Archive,
+  LayoutGrid,
+  Award,
+  Settings,
+  Flag
 } from '@lucide/vue'
 import { useLocale } from '~/utils/locale'
 
@@ -177,11 +194,49 @@ const menuGroups = computed(() => [
       { icon: CalendarDays, label: locale.value.menu?.schedule || '排班管理', id: 'schedule' },
       { icon: Printer, label: locale.value.menu?.print || '打印管理', id: 'print' },
       { icon: Music2, label: locale.value.menu?.songs || '点歌管理', id: 'songs' },
+      { icon: Megaphone, label: locale.value.menu?.announcement || '公告栏编辑', id: 'announcement' },
       {
         icon: BarChart3,
         label: locale.value.menu?.dataAnalysis || '数据分析',
         id: 'data-analysis',
         permissionId: 'data-analysis'
+      }
+    ]
+  },
+  {
+    section: locale.value.sections?.review || '审核',
+    items: [
+      { icon: ClipboardCheck, label: locale.value.menu?.reviewNotes || '公开备注审核', id: 'review-notes' },
+      { icon: UserCheck, label: locale.value.menu?.reviewUsers || '用户审核', id: 'review-users' },
+      {
+        icon: MessageSquare,
+        label: locale.value.menu?.communityReview || '社区帖子审核',
+        id: 'community-review'
+      },
+      {
+        icon: MessagesSquare,
+        label: locale.value.menu?.communityCommentReview || '社区评论审核',
+        id: 'community-comment-review'
+      }
+    ]
+  },
+  {
+    section: locale.value.sections?.community || '回声社区',
+    items: [
+      { icon: LayoutGrid, label: locale.value.menu?.communityBoards || '社区板块', id: 'community-boards' },
+      { icon: Award, label: locale.value.menu?.communityTitles || '社区称号', id: 'community-titles' },
+      { icon: Users, label: locale.value.menu?.communityUsers || '社区用户', id: 'community-users' },
+      { icon: Archive, label: locale.value.menu?.communityArchive || '社区归档记录', id: 'community-archive' },
+      { icon: Flag, label: locale.value.menu?.communityReports || '举报与申诉', id: 'community-reports' },
+      {
+        icon: BarChart3,
+        label: locale.value.menu?.communityOverview || '社区数据看板',
+        id: 'community-overview'
+      },
+      {
+        icon: Settings,
+        label: locale.value.menu?.communitySettings || '社区配置',
+        id: 'community-settings'
       }
     ]
   },
@@ -200,7 +255,7 @@ const menuGroups = computed(() => [
     section: locale.value.sections?.system || '系统设置',
     items: [
       { icon: Bell, label: locale.value.menu?.notifications || '通知管理', id: 'notifications' },
-      { icon: Mail, label: locale.value.menu?.smtpConfig || 'SMTP 配置', id: 'smtp-config' },
+      { icon: Mail, label: locale.value.menu?.smtpConfig || '推送配置', id: 'smtp-config' },
       { icon: Clock, label: locale.value.menu?.playtimes || '播放时段', id: 'playtimes' },
       { icon: FileEdit, label: locale.value.menu?.requestTimes || '点歌时段', id: 'request-times' },
       { icon: BookOpen, label: locale.value.menu?.semesters || '学期管理', id: 'semesters' },
@@ -208,7 +263,9 @@ const menuGroups = computed(() => [
       { icon: Ticket, label: locale.value.menu?.cardCodes || '卡密管理', id: 'card-codes' },
       { icon: ListMusic, label: locale.value.menu?.musicSource || '音源控制', id: 'music-source' },
       { icon: Globe, label: locale.value.menu?.siteConfig || '站点配置', id: 'site-config' },
-      { icon: Database, label: locale.value.menu?.database || '数据库', id: 'database' }
+      { icon: Database, label: locale.value.menu?.database || '数据库', id: 'database' },
+      { icon: Activity, label: locale.value.menu?.systemBoard || '系统看板', id: 'system-board' },
+      { icon: ShieldAlert, label: locale.value.menu?.attackLogs || '攻击日志', id: 'attack-logs' }
     ]
   },
   {

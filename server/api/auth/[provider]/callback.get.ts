@@ -1,3 +1,5 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import {
   decodeOAuthStateCookie,
   getOAuthStateCookieNames,
@@ -20,6 +22,7 @@ import {
   isSupportedOAuthProvider
 } from '~~/server/services/oauthConfigService'
 import { getClientIP } from '~~/server/utils/ip-utils'
+import { recordLoginAttempt } from '~~/server/utils/loginAttempt'
 import { getBeijingTime } from '~/utils/timeUtils'
 import type { H3Event } from 'h3'
 import { getRequestOrigin, isSecureRequest } from '~~/server/utils/request-utils'
@@ -213,16 +216,11 @@ async function handleUserLoginOrBind(
   const safeReturnTo = getSafeOAuthReturnPath(returnTo)
 
   // 4. 检查是否已登录（绑定模式）
-  const authToken = getCookie(event, 'auth-token')
-  let currentUser: any = null
-  if (authToken) {
-    try {
-      const payload = JWTEnhanced.verifyToken(authToken)
-      currentUser = payload
-    } catch (e) {
-      // Token 无效或已过期，忽略
-    }
-  }
+  // 只信任认证中间件确认过的会话：Cookie 中残留的已撤销 JWT 不能用于绑定
+  const sessionUser = event.context.user
+  const currentUser: any = sessionUser
+    ? { userId: sessionUser.id, tokenVersion: sessionUser.tokenVersion }
+    : null
 
   // 5. 检查身份关联
   const existingIdentity = await db.query.userIdentities.findFirst({
@@ -389,6 +387,43 @@ async function handleUserLoginOrBind(
       )
     }
 
+    // 已开启 TOTP 的账号，第三方登录同样必须完成二次验证，不能凭第三方身份直接签发会话
+    const totpIdentity = await db.query.userIdentities.findFirst({
+      where: (t, { and, eq }) => and(eq(t.userId, user.id), eq(t.provider, 'totp'))
+    })
+    if (totpIdentity) {
+      const tempToken = JWTEnhanced.sign(
+        {
+          userId: user.id,
+          tokenVersion: user.tokenVersion,
+          type: 'pre-auth',
+          scope: '2fa_pending'
+        },
+        { expiresIn: '5m' }
+      )
+      // 清掉可能残留的绑定令牌，避免 2FA 通过后被误当成绑定流程处理
+      deleteCookie(event, 'binding-token')
+      setCookie(event, 'pre-auth-token', tempToken, {
+        httpOnly: true,
+        secure: isSecure,
+        sameSite: 'lax',
+        maxAge: 5 * 60,
+        path: '/'
+      })
+
+      const [local, domain] =
+        user.email && user.emailVerified ? user.email.split('@') : ['', '']
+      const maskedEmail =
+        local && domain ? (local.length <= 2 ? `***@${domain}` : `${local.slice(0, 2)}****@${domain}`) : ''
+      const params = new URLSearchParams({
+        action: '2fa',
+        userId: String(user.id),
+        methods: maskedEmail ? 'totp,email' : 'totp'
+      })
+      if (maskedEmail) params.set('email', maskedEmail)
+      return sendRedirect(event, `/login?${params.toString()}`)
+    }
+
     await db.transaction(async (tx) => {
       const [userRecord] = await tx
         .select({
@@ -420,12 +455,18 @@ async function handleUserLoginOrBind(
         .where(eq(users.id, user.id))
     })
 
+    await recordLoginAttempt(event, {
+      username: existingIdentity.user.username,
+      result: 'success',
+      detail: `OAuth 登录（${provider}）`
+    })
+
     const { token } = await createAuthSession(event, existingIdentity.user, provider)
     setCookie(event, 'auth-token', token, {
       httpOnly: true,
       secure: isSecure,
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7,
+      maxAge: 60 * 60 * 6,
       path: '/'
     })
     return sendRedirect(event, safeReturnTo || '/')

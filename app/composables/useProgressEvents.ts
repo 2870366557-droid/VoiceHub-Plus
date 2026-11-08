@@ -1,3 +1,5 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import { onUnmounted, ref } from 'vue'
 import { useProgress } from './useProgress'
 import { useAuth } from './useAuth'
@@ -31,13 +33,10 @@ export const useProgressEvents = () => {
     startIndeterminate('正在连接...')
 
     try {
-      // cookie 认证下不能把真实 JWT 暴露到 URL，保留旧 token 参数仅作兼容。
-      const auth = useAuth()
-      const token = auth.getToken()
+      // 认证由 auth-token cookie 随 EventSource 自动携带（withCredentials），
+      // 不再把 JWT 放到 URL：URL 会落入 Nginx 访问日志与 Referer（2026-10-23 安全加固；
+      // 服务端已改为只认中间件校验后的登录态，query.token 参数不再被读取）
       const params = new URLSearchParams({ id })
-      if (token) {
-        params.set('token', token)
-      }
       eventSource = new EventSource('/api/progress/events?' + params.toString(), {
         withCredentials: true
       })
@@ -82,7 +81,7 @@ export const useProgressEvents = () => {
               data.subMessage !== undefined ? data.subMessage : undefined
             )
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error('处理进度事件时出错:', err)
         }
       }
@@ -98,7 +97,7 @@ export const useProgressEvents = () => {
       eventSource.addEventListener('close', () => {
         disconnect()
       })
-    } catch (err) {
+    } catch (err: any) {
       console.error('创建EventSource时出错:', err)
       setError('无法连接到进度更新服务')
     }
@@ -129,7 +128,7 @@ export const useProgressEvents = () => {
       const data = await response.json()
       progressId.value = data.id
       return data.id
-    } catch (err) {
+    } catch (err: any) {
       console.error('获取进度ID时出错:', err)
       return null
     }

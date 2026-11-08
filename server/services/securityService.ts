@@ -1,3 +1,4 @@
+// Modified by YH-Chen on 2026-10-17
 import {
   RedisStateUnavailableError,
   setStore,
@@ -13,13 +14,6 @@ import { users, systemSettings } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { getServerTimestamp, getServerDate } from '~~/server/utils/serverTime'
 import { SYSTEM_SETTINGS_DEFAULTS } from '~~/server/utils/system-settings-defaults'
-
-// 账户锁定信息接口
-interface AccountLockInfo {
-  failedAttempts: number
-  lockedUntil: Date | null
-  lastAttemptTime: Date
-}
 
 // IP监控信息接口
 interface IPMonitorInfo {
@@ -58,14 +52,13 @@ const userVoteStats = new Map<
 const notificationRateLimit = new Map<string, Date>()
 const NOTIFICATION_RATE_LIMIT_MINUTES = 5 // 同一类型通知5分钟内只发送一次
 const fallbackLoginFailures = new Map<string, { count: number; expiresAt: number }>()
-const fallbackAccountLocks = new Map<string, number>()
 const REDIS_FALLBACK_LOG_INTERVAL_MS = 60 * 1000
 let lastRedisFallbackLogAt = 0
 
 // 配置常量
 const SECURITY_CONFIG = {
-  MAX_FAILED_ATTEMPTS: 5,
-  LOCK_DURATION_MINUTES: 10,
+  // 达到该失败次数即封禁来源 IP（验证码阈值由后台 captchaMaxFailures 单独控制）
+  MAX_FAILED_ATTEMPTS: 10,
   IP_MONITOR_WINDOW_MINUTES: 10,
   IP_MAX_DIFFERENT_ACCOUNTS: 3,
   IP_BLOCK_DURATION_MINUTES: 10
@@ -126,15 +119,6 @@ const incrementFallbackFailureCount = (key: string) => {
   return count
 }
 
-const getFallbackLockedUntil = (username: string) => {
-  const lockedUntil = fallbackAccountLocks.get(username) || 0
-  if (lockedUntil <= getServerTimestamp()) {
-    fallbackAccountLocks.delete(username)
-    return 0
-  }
-  return lockedUntil
-}
-
 /**
  * 清理过期的锁定记录
  */
@@ -144,10 +128,6 @@ function cleanupExpiredLocks() {
   for (const [username, record] of fallbackLoginFailures.entries()) {
     if (record.expiresAt <= now.getTime()) fallbackLoginFailures.delete(username)
   }
-  for (const [username, lockedUntil] of fallbackAccountLocks.entries()) {
-    if (lockedUntil <= now.getTime()) fallbackAccountLocks.delete(username)
-  }
-
   // 清理过期的IP监控记录
   for (const [ip, monitorInfo] of ipMonitor.entries()) {
     const windowStart = new Date(
@@ -201,48 +181,6 @@ function cleanupExpiredLocks() {
 }
 
 /**
- * 检查账户是否被锁定
- */
-export async function isAccountLocked(username: string): Promise<boolean> {
-  const lockKey = `account_lock:${username}`
-  let redisLockedUntil = 0
-  try {
-    const lockInfoStr = await getStore(lockKey)
-    if (lockInfoStr) {
-      const parsed = parseInt(lockInfoStr, 10)
-      if (Number.isFinite(parsed)) redisLockedUntil = parsed
-    }
-  } catch (error) {
-    handleRedisStateUnavailable(error)
-  }
-
-  return Math.max(redisLockedUntil, getFallbackLockedUntil(username)) > getServerTimestamp()
-}
-
-/**
- * 获取账户锁定剩余时间（分钟）
- */
-export async function getAccountLockRemainingTime(username: string): Promise<number> {
-  const lockKey = `account_lock:${username}`
-  let redisLockedUntil = 0
-  try {
-    const lockInfoStr = await getStore(lockKey)
-    if (lockInfoStr) {
-      const parsed = parseInt(lockInfoStr, 10)
-      if (Number.isFinite(parsed)) redisLockedUntil = parsed
-    }
-  } catch (error) {
-    handleRedisStateUnavailable(error)
-  }
-
-  const now = getServerTimestamp()
-  const lockedUntil = Math.max(redisLockedUntil, getFallbackLockedUntil(username))
-  if (lockedUntil <= now) return 0
-
-  return Math.ceil((lockedUntil - now) / (1000 * 60))
-}
-
-/**
  * 读取 IP 封禁信息：本地缓存命中直接判定，未命中回源 Redis（保证多实例封禁一致）
  */
 async function getIPBlockInfo(ip: string): Promise<IPBlockInfo | null> {
@@ -266,7 +204,7 @@ async function getIPBlockInfo(ip: string): Promise<IPBlockInfo | null> {
     }
     ipBlacklist.set(ip, blockInfo)
     return blockInfo
-  } catch (error) {
+  } catch (error: any) {
     handleRedisStateUnavailable(error)
     return null
   }
@@ -312,7 +250,7 @@ async function blockIP(ip: string, reason: string): Promise<void> {
       }),
       SECURITY_CONFIG.IP_BLOCK_DURATION_MINUTES * 60
     )
-  } catch (error) {
+  } catch (error: any) {
     handleRedisStateUnavailable(error)
   }
 
@@ -347,40 +285,30 @@ export function getUserBlockRemainingTime(userId: number): number {
 }
 
 /**
- * 记录登录失败（用户名与 IP 双维度计数，防止换用户名/换设备重置试错额度）
+ * 记录登录失败（用户名与 IP 双维度计数；达到阈值封禁来源 IP，不锁定账号——账号锁定可被匿名用来拒绝他人登录）
  */
 export async function recordLoginFailure(username: string, ip: string): Promise<void> {
   const failKey = `login_fail:${username}`
   const ipFailKey = `login_fail_ip:${ip}`
-  const lockKey = `account_lock:${username}`
 
-  let userAttempts: number
+  // 用户名维度：仅作为验证码阈值依据（跨 IP 累计），不参与封锁判定
   try {
-    userAttempts = Math.max(await incrStore(failKey, 30 * 60), getFallbackFailureCount(failKey))
-  } catch (error) {
+    await incrStore(failKey, 30 * 60)
+  } catch (error: any) {
     handleRedisStateUnavailable(error)
-    userAttempts = incrementFallbackFailureCount(failKey)
-  }
-  // IP 维度计数仅作为登录预检依据，不参与账户锁定判定
-  try {
-    await incrStore(ipFailKey, 30 * 60)
-  } catch (error) {
-    handleRedisStateUnavailable(error)
-    incrementFallbackFailureCount(ipFailKey)
+    incrementFallbackFailureCount(failKey)
   }
 
-  // 账户锁定只按用户名维度判定，避免 IP 维度计数误锁无关账户
-  if (userAttempts >= SECURITY_CONFIG.MAX_FAILED_ATTEMPTS) {
-    const lockedUntil = getServerTimestamp() + SECURITY_CONFIG.LOCK_DURATION_MINUTES * 60 * 1000
-    try {
-      await setStore(lockKey, lockedUntil.toString(), SECURITY_CONFIG.LOCK_DURATION_MINUTES * 60)
-    } catch (error) {
-      handleRedisStateUnavailable(error)
-      fallbackAccountLocks.set(username, lockedUntil)
-    }
-    console.log(
-      `账户 ${username} 因连续 ${userAttempts} 次登录失败被锁定 ${SECURITY_CONFIG.LOCK_DURATION_MINUTES} 分钟`
-    )
+  // IP 维度：达到阈值即封禁该 IP
+  let ipAttempts: number
+  try {
+    ipAttempts = Math.max(await incrStore(ipFailKey, 30 * 60), getFallbackFailureCount(ipFailKey))
+  } catch (error: any) {
+    handleRedisStateUnavailable(error)
+    ipAttempts = incrementFallbackFailureCount(ipFailKey)
+  }
+  if (ip !== 'unknown' && ipAttempts >= SECURITY_CONFIG.MAX_FAILED_ATTEMPTS) {
+    await blockIP(ip, `连续 ${ipAttempts} 次登录失败`)
   }
 
   // 记录IP监控信息
@@ -392,16 +320,13 @@ export async function recordLoginFailure(username: string, ip: string): Promise<
  */
 export async function recordLoginSuccess(username: string, ip: string): Promise<void> {
   const failKey = `login_fail:${username}`
-  const ipFailKey = `login_fail_ip:${ip}`
-  const lockKey = `account_lock:${username}`
   try {
-    await Promise.all([delStore(failKey), delStore(lockKey), delStore(ipFailKey)])
-  } catch (error) {
+    // 只清用户名维度的失败计数；IP 维度计数保留，避免用自有账号成功登录来重置限流
+    await delStore(failKey)
+  } catch (error: any) {
     handleRedisStateUnavailable(error)
   }
   fallbackLoginFailures.delete(failKey)
-  fallbackLoginFailures.delete(ipFailKey)
-  fallbackAccountLocks.delete(username)
 
   // 记录IP监控信息（成功登录也需要监控）
   recordIPAttempt(ip, username)
@@ -525,14 +450,14 @@ async function triggerSecurityAlert(ip: string, attemptedAccounts: string[]): Pr
             console.log(`向超级管理员 ${admin.name} 发送Meow推送警报失败`)
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error(`向超级管理员 ${admin.name} 发送安全警报失败:`, error)
       }
     }
 
     // 重置该IP的监控记录，避免重复警报
     ipMonitor.delete(ip)
-  } catch (error) {
+  } catch (error: any) {
     console.error('触发安全警报时发生错误:', error)
   }
 }
@@ -564,7 +489,7 @@ async function triggerAccountIpSwitchAlert(username: string, ips: string[]): Pro
         }
       } catch {}
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('触发账号IP切换警报时发生错误:', error)
   }
 }
@@ -625,7 +550,7 @@ export function recordUserVoteActivity(userId: number, songTitle?: string): { an
   // 如果只有一个投票记录，无法计算速率（时间跨度为0），且单个投票不构成"速率"，直接视为0
   let currentRate = 0
   if (stats.windowTimestamps.length > 1) {
-    const windowDurationMin = Math.max(1e-6, (now - Math.min(...stats.windowTimestamps)) / 60000)
+    const windowDurationMin = Math.max(1, (now - Math.min(...stats.windowTimestamps)) / 60000)
     currentRate = stats.windowTimestamps.length / windowDurationMin
   }
 
@@ -636,12 +561,12 @@ export function recordUserVoteActivity(userId: number, songTitle?: string): { an
 
   // 动态调整阈值：基础阈值 + EMA的动态倍数
   // 当EMA较低时，使用较高倍数；当EMA较高时，使用较低倍数，避免误报
-  const baseThreshold = 5 // 基础阈值：每分钟5票
+  const baseThreshold = 10 // 基础阈值：每分钟10票（本站按校园实际投票节奏放宽）
   const dynamicMultiplier = Math.max(2, 5 - Math.min(3, stats.emaPerMin / 100)) // 动态倍数：2-5倍
   const threshold = Math.max(baseThreshold, stats.emaPerMin * dynamicMultiplier)
 
   // 只有当当前速率显著超过阈值（1.5倍）时，才触发异常
-  const anomaly = currentRate > threshold * 1.5
+  const anomaly = currentRate > threshold * 2.5
   if (anomaly) triggerVoteAnomalyAlert(userId, stats.emaPerMin, currentRate, songTitle)
   return { anomaly }
 }
@@ -678,7 +603,7 @@ async function triggerSongVoteBurstAlert(
         }
       } catch {}
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('触发歌曲投票激增警报时发生错误:', error)
   }
 }
@@ -757,7 +682,7 @@ ${topSongs}
         }
       } catch {}
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('发送异常投票汇总通知失败:', error)
   } finally {
     // 清空队列和定时器
@@ -815,7 +740,7 @@ async function triggerVoteAnomalyAlert(
 
     // 启动聚合定时器
     anomalyAggregationTimer = setTimeout(flushAnomalyAggregation, ANOMALY_AGGREGATION_WINDOW_MS)
-  } catch (error) {
+  } catch (error: any) {
     console.error('触发投票异常警报时发生错误:', error)
   }
 }
@@ -839,7 +764,7 @@ async function readFailureCount(key: string): Promise<number> {
     const val = await getStore(key)
     const count = val ? parseInt(val, 10) : 0
     return Math.max(Number.isFinite(count) ? count : 0, getFallbackFailureCount(key))
-  } catch (error) {
+  } catch (error: any) {
     handleRedisStateUnavailable(error)
     return getFallbackFailureCount(key)
   }
@@ -895,7 +820,7 @@ export async function resolveCaptchaSettings(): Promise<CaptchaSettings> {
       turnstileSecretKey: settings.turnstileSecretKey || '',
       esaScenes: settings.esaCaptchaScenes
     }
-  } catch (error) {
+  } catch (error: any) {
     console.warn('读取验证码配置失败，已暂时禁用:', error)
     return { ...CAPTCHA_SETTINGS_DEFAULTS }
   }

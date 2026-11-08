@@ -1,9 +1,12 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import bcrypt from 'bcryptjs'
 import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
 import { createApiError } from '~~/server/utils/apiError'
 import { getAdminPasswordViolation } from '~~/server/utils/admin-password-policy'
+import { validateUsernameFormat } from '~~/server/utils/username-policy'
 
 const normalizeRequiredText = (value: unknown) => String(value || '').trim()
 const normalizeOptionalText = (value: unknown) => {
@@ -39,6 +42,12 @@ export default defineEventHandler(async (event) => {
     throw createApiError(400, violation.code, violation.message)
   }
 
+  // 用户名格式：禁中文、2-20 位、禁纯数字（唯一性在下方查库）
+  const usernameFormatError = validateUsernameFormat(normalizedUsername)
+  if (usernameFormatError) {
+    throw createApiError(400, usernameFormatError.code, usernameFormatError.message)
+  }
+
   try {
     // 检查用户名是否已存在
     const existingUserResult = await db
@@ -60,7 +69,7 @@ export default defineEventHandler(async (event) => {
 
     // 角色权限控制
     let validRole = 'USER'
-    if (body.role && ['USER', 'ADMIN', 'SONG_ADMIN', 'SUPER_ADMIN'].includes(body.role)) {
+    if (body.role && ['USER', 'ADMIN', 'SONG_ADMIN', 'BROADCASTER', 'REVIEWER', 'SUPER_ADMIN'].includes(body.role)) {
       // 超级管理员可以创建任何角色的用户
       if (user.role === 'SUPER_ADMIN') {
         validRole = body.role

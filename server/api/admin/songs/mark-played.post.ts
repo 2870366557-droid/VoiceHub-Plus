@@ -1,10 +1,13 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import { db } from '~/drizzle/db'
-import { createSongPlayedNotification } from '~~/server/services/notificationService'
-import { songs, songReplayRequests } from '~/drizzle/schema'
-import { eq, and, inArray } from 'drizzle-orm'
-import { getBeijingTime } from '~/utils/timeUtils'
+import { createSongPlayedNotifications } from '~~/server/services/notificationService'
+import { songs, songReplayRequests, schedules } from '~/drizzle/schema'
+import { eq, and, inArray, lte, sql } from 'drizzle-orm'
+import { getBeijingTime, getBeijingEndOfDay } from '~/utils/timeUtils'
 import { getClientIP } from '~~/server/utils/ip-utils'
 import { restoreReplayRequestsToPending } from '~~/server/utils/scheduleReplayBinding'
+import { enqueueAstrbotGroupEvent } from '~~/server/services/astrbotGroupService'
 import { z } from 'zod'
 
 const markPlayedSchema = z.object({
@@ -24,14 +27,6 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // 检查是否是管理员
-  if (!['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN'].includes(user.role)) {
-    throw createError({
-      statusCode: 403,
-      message: '只有管理员可以标记歌曲为已播放'
-    })
-  }
-
   const body = await readBody(event)
   const validatedDataResult = markPlayedSchema.safeParse(body)
 
@@ -43,6 +38,22 @@ export default defineEventHandler(async (event) => {
   }
 
   const validatedData = validatedDataResult.data
+
+  // 撤回已播放
+  const isUnmark = validatedData.unmark === true
+
+  // 权限校验：放歌员（BROADCASTER）可以标记歌曲已播放，但不能「取消已播放」；
+  // 其余变更排期状态的角色维持原有权限。
+  if (isUnmark
+    ? !['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN'].includes(user.role)
+    : !['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN', 'BROADCASTER'].includes(user.role)) {
+    throw createError({
+      statusCode: 403,
+      message: isUnmark
+        ? '只有管理员可以取消歌曲的已播放状态'
+        : '只有管理员或放歌员可以标记歌曲为已播放'
+    })
+  }
 
   const songIds = Array.from(
     new Set([
@@ -58,13 +69,49 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // 撤回已播放
-  const isUnmark = validatedData.unmark === true
+  // 广播站（SONG_ADMIN）与放歌员（BROADCASTER）只能标记「今天及以前」排期的歌曲：
+  // 排期在明天及以后的歌曲须等到当天才能标播放，避免提前把未播出场次标成已播。
+  // ADMIN / SUPER_ADMIN 不受此限制（可修正误排期）。
+  let allowedSongIds = songIds
+  let skippedBySchedule = 0
+  if (!isUnmark && (user.role === 'SONG_ADMIN' || user.role === 'BROADCASTER')) {
+    const earliestSchedules = await db
+      .select({
+        songId: schedules.songId,
+        firstPlayDate: sql<Date | string | null>`min(${schedules.playDate})`
+      })
+      .from(schedules)
+      .where(and(inArray(schedules.songId, songIds), eq(schedules.isDraft, false)))
+      .groupBy(schedules.songId)
+
+    const endOfToday = getBeijingEndOfDay().getTime()
+    const futureSongIds = new Set(
+      earliestSchedules
+        .filter((row) => {
+          if (!row.firstPlayDate) return false
+          const playTime = new Date(row.firstPlayDate).getTime()
+          return Number.isFinite(playTime) && playTime > endOfToday
+        })
+        .map((row) => row.songId)
+    )
+
+    if (futureSongIds.size > 0) {
+      allowedSongIds = songIds.filter((id) => !futureSongIds.has(id))
+      skippedBySchedule = songIds.length - allowedSongIds.length
+
+      if (allowedSongIds.length === 0) {
+        throw createError({
+          statusCode: 400,
+          message: '广播站只能标记今天及以前排期的歌曲，所选歌曲的排期尚未到播放日期'
+        })
+      }
+    }
+  }
 
   // 过滤需要更新的歌曲
   const condition = !isUnmark
-    ? and(inArray(songs.id, songIds), eq(songs.played, false))
-    : and(inArray(songs.id, songIds), eq(songs.played, true))
+    ? and(inArray(songs.id, allowedSongIds), eq(songs.played, false))
+    : and(inArray(songs.id, allowedSongIds), eq(songs.played, true))
 
   const { updatedSongsResult, updatedSongIds } = await db.transaction(async (tx) => {
     const updatedSongsResult = await tx
@@ -115,22 +162,37 @@ export default defineEventHandler(async (event) => {
     return { updatedSongsResult, updatedSongIds }
   })
 
-  // 异步发送通知
+  // 异步发送通知（同一用户多首歌曲合并为一条）
   if (!isUnmark && updatedSongIds.length > 0) {
     event.waitUntil(
-      Promise.allSettled(
-        updatedSongIds.map((songId) =>
-          createSongPlayedNotification(songId).catch((err) => {
-            console.error(`发送歌曲(${songId})已播放通知失败:`, err)
-          })
-        )
-      )
+      createSongPlayedNotifications(updatedSongIds).catch((err) => {
+        console.error('发送歌曲已播放通知失败:', err)
+      })
     )
+    // 群聊推送：歌曲已播放（默认关闭，噪音较大，按需在后台开启）。
+    // 批量标播放时逐首发一条，但同群同事件的合并窗口会把它们并成一条消息。
+    event.waitUntil((async () => {
+      try {
+        const played = await db.select({ title: songs.title, artist: songs.artist })
+          .from(songs).where(inArray(songs.id, updatedSongIds))
+        for (const song of played) {
+          await enqueueAstrbotGroupEvent('songPlayed', '歌曲已播放', `《${song.title}》- ${song.artist} 已播放`)
+        }
+      } catch (err: any) {
+        console.error('发送群聊已播放通知失败:', err)
+      }
+    })())
   }
 
+  const baseMessage = isUnmark ? '歌曲已成功撤回已播放状态' : '歌曲已成功标记为已播放'
+
   return {
-    message: isUnmark ? '歌曲已成功撤回已播放状态' : '歌曲已成功标记为已播放',
+    message:
+      skippedBySchedule > 0
+        ? `${baseMessage}；另有 ${skippedBySchedule} 首歌曲排期在今天之后已跳过（广播站只能标记今天及以前排期的歌曲）`
+        : baseMessage,
     count: updatedSongsResult.length,
+    skipped: skippedBySchedule,
     updatedSongIds: updatedSongIds
   }
 })

@@ -1,3 +1,344 @@
+<!-- Modified by YH-Chen-Eternity on 2026-10-23 -->
+
+> [!WARNING]
+> ### ⚠️ 本项目是 [laoshuikaixue/VoiceHub](https://github.com/laoshuikaixue/VoiceHub) 的非官方社区修改版（VoiceHub-Plus）
+>
+> - **原项目地址**：<https://github.com/laoshuikaixue/VoiceHub>
+> - 本项目与原作者**无关**，不代表原作者观点；**请勿将本项目的 Bug 提交给原作者**——问题请提交到本仓库的 Issues。
+> - 许可证：**GNU General Public License v3.0（GPL-3.0）**，与原项目一致；原 `LICENSE`、版权声明与免责声明均**完整保留**。
+> - **所有错误上报默认关闭**：本分支已移除/禁用向原作者 Sentry 项目及任何第三方服务器上传数据的逻辑（详见下方「主要修改内容」）。如需自行收集错误，请设置 `SENTRY_DSN` / `NUXT_PUBLIC_SENTRY_DSN` 并显式设置 `SENTRY_ENABLED=true`。
+> - 使用本修改版产生的问题由使用者自行承担。
+
+<details>
+<summary><b>目录</b></summary>
+
+- [项目简介](#项目简介)
+- [主要修改内容（Changelog）](#主要修改内容changelog)（速览 + 折叠明细）
+- [安装与使用](#安装与使用)
+  - [回声社区内容审核服务（可选）](#回声社区内容审核服务可选)
+- [开源协议与版权声明](#开源协议与版权声明)
+- [致谢](#致谢)
+- [赞赏支持（社区版维护者）](#赞赏支持社区版维护者)
+- [VoiceHub - 校园广播站点歌系统](#voicehub---校园广播站点歌系统)
+- [项目截图](#项目截图)
+- [主要功能](#主要功能)
+  - [🎵 核心功能](#-核心功能)
+  - [👥 用户管理](#-用户管理)
+  - [📅 排期管理](#-排期管理)
+  - [🔔 通知系统](#-通知系统)
+  - [💾 数据管理](#-数据管理)
+  - [🎨 用户体验](#-用户体验)
+- [技术栈](#技术栈)
+  - [前端技术](#前端技术)
+  - [后端技术](#后端技术)
+- [系统架构](#系统架构)
+- [部署指南](#部署指南)
+  - [一键部署](#一键部署)
+  - [Linux 服务器部署](#linux-服务器部署)
+  - [Docker 部署](#docker-部署)
+  - [Podman 部署](#podman-部署)
+  - [飞牛 (FnOS) 部署](#飞牛-fnos-部署)
+  - [Nix / NixOS](#nix--nixos)
+  - [本地开发部署](#本地开发部署)
+  - [生产环境部署](#生产环境部署)
+  - [数据库管理命令](#数据库管理命令)
+  - [升级与迁移](#升级与迁移)
+- [系统配置](#系统配置)
+  - [站点配置管理](#站点配置管理)
+  - [数据库备份与恢复](#数据库备份与恢复)
+  - [权限与角色管理](#权限与角色管理)
+- [环境变量说明](#环境变量说明)
+- [OAuth 配置](#oauth-配置)
+- [项目结构](#项目结构)
+  - [目录说明](#目录说明)
+  - [主题系统](#主题系统)
+- [使用说明](#使用说明)
+  - [普通用户](#普通用户)
+  - [管理员](#管理员)
+- [数据库管理](#数据库管理)
+  - [Drizzle ORM + Neon Database](#drizzle-orm--neon-database)
+  - [数据库初始化](#数据库初始化)
+  - [数据库备份与恢复](#数据库备份与恢复-1)
+  - [备份文件格式](#备份文件格式)
+- [开发指南](#开发指南)
+  - [组合式API](#组合式api)
+  - [添加新功能](#添加新功能)
+  - [数据库模型修改](#数据库模型修改)
+  - [国际化 (i18n)](#国际化-i18n)
+  - [OAuth 平台扩展指南](#oauth-平台扩展指南)
+  - [音源扩展开发指南](#音源扩展开发指南)
+- [贡献说明](#贡献说明)
+- [音乐服务免责声明](#音乐服务免责声明)
+  - [关于音乐内容与版权](#关于音乐内容与版权)
+  - [关于功能说明](#关于功能说明)
+  - [法律与责任声明](#法律与责任声明)
+- [隐私说明与遥测](#隐私说明与遥测)
+  - [遥测默认状态](#遥测默认状态)
+  - [收集的数据范围](#收集的数据范围)
+  - [安全保障](#安全保障)
+  - [数据接收方](#数据接收方)
+- [致谢](#致谢-1)
+  - [UI设计](#ui设计)
+  - [贡献者](#贡献者)
+  - [参考项目](#参考项目)
+- [许可证](#许可证)
+- [Star History](#star-history)
+- [其他](#其他)
+
+</details>
+
+## 项目简介
+
+VoiceHub 是一个面向校园的广播站点歌系统（Nuxt 4 全栈应用），核心功能包括：歌曲搜索与投稿、点赞与热度统计、自动排期与播出时段管理、公告栏、用户注册与审核、管理后台等。完整功能清单见下方[原项目 README 的「主要功能」](#主要功能)一节。
+
+**为什么有这个分支**：原项目面向通用部署，而本仓库服务于一个真实校园广播站的日常运营，在此过程中沉淀了一批**社区运营/安全/合规方向**的定制——包括完整的管理员操作审计、边缘安全层（防暴力破解/脚本/地域闸）、面向管理员的攻击日志面板、账号合规策略（强制改密/改用户名、邮箱域名白名单）等。这些改动通用性较强，因此以社区版形式开源。
+
+## 主要修改内容（Changelog）
+
+> 最新更新：**2026-11-08**。下方为精简速览；各轮完整记录与功能明细已折叠，点击展开查看。
+
+**更新速览**
+
+| 日期 | 主题 |
+| --- | --- |
+| 2026-11-08 | 音乐解析与播放状态、社区图片与评论分页、媒体缓存优化 |
+| 2026-10-31 | 音乐链接解析稳定性与响应速度 |
+| 2026-10-28 | 依赖与运行时基线同步 |
+| 2026-10-27 | 社区增强批次（第二批） |
+| 2026-10-25 | 安全加固与社区运营修复 |
+| 2026-10-24 | 回声社区归档、评论审核与审核服务融合 |
+| 2026-10-23 | 安全加固、攻击日志面板与错误上报治理 |
+
+> 逐文件明细见 [`CUSTOM_CHANGES.md`](CUSTOM_CHANGES.md)；10-27 批次见 [`社区增强批次-20261027.md`](社区增强批次-20261027.md)。
+
+<details>
+<summary><b>展开查看完整更新记录与功能明细（2026-10-23 ~ 2026-11-08）</b></summary>
+
+### 2026-11-08 音乐解析、社区浏览与媒体缓存优化
+
+**音乐解析与播放**
+
+- 重构歌曲链接解析链路：补齐多源兜底与免费音源降级，按后端歌曲记录补全标题/艺人，提升无卡密场景下的取链成功率。
+- 解析结果增加共享缓存与并发去重，减少重复回源；登录态与私有直链不进入共享缓存。
+- 已登录 QQ 音乐 / 网易云音乐时优先使用对应官方解析，移除 VIP 门槛判断（有登录态即可）。
+- 「正在播放」改为双槽实时状态：优先采用放歌员上报，其次匿名播控端，最后退回按排期推断；按角色判定，不再依赖固定账号 ID。
+
+**社区浏览与图片展示**
+
+- 帖子单图改为按原比例完整显示（解除方形裁切），多图保持九宫格、点开查看原图。
+- 评论改为按顶层评论游标分页、一次携带全部回复，并新增「加载更多」，避免每次加载全部评论。
+- 社区图片接口区分公开/私有缓存策略：公开图可长期缓存，私有图与匿名不可见内容不进入共享缓存。
+
+**缓存与运维脚本**
+
+- 媒体资源按公开/私有权属区分缓存策略，降低回源与加载耗时。
+- 定时运维脚本统一改为从外部配置读取，站点信息与凭据均不写入脚本；脚本与配置模板见 [`deploy/automation/`](deploy/automation/)。
+- 巡检补充公网监听端口检查，输出实际监听端口，避免误报与漏报。
+
+### 2026-10-31 音乐链接解析稳定性与响应速度
+
+- 解析链路补齐缓存、并发去重与失败兜底，降低高峰期重复请求对音源的压力。
+- 统一音源相关环境变量命名，补充歌曲元数据回填与多关键词、多类型检索。
+- 具体文件与行为见下方详细章节及 `CUSTOM_CHANGES.md`。
+
+### 2026-10-28 依赖与运行时基线同步
+
+- 第三方依赖与内容审核服务运行时同步到最新稳定版本，清理未使用依赖。
+- 相关变更已通过生产构建与类型检查，未改动业务行为。
+
+### 2026-10-27 社区增强批次（第二批）
+
+- 修复 7 个脚本 shebang 错位导致的容器启动异常。
+- 社区身份分级脱敏、`@` 提及按查看者重写；评论支持无限嵌套楼中楼，子评论可点赞、可举报。
+- 放歌员可标记「已播放」，管理员审计日志记录审核人、对象与结果。
+- 歌曲黑名单判定收敛为单一数据源，社区选歌放开，点赞与热度解耦；修复取链失败导致歌曲无法播放。
+- 封面点击播放、点赞匿名偏好弹窗；待审核内容超过 5 条时每小时邮件提醒审核人员。
+- 社区信息流补充歌曲播放字段、点赞态与查看者维度。
+- 批次明细见 [`社区增强批次-20261027.md`](社区增强批次-20261027.md)。
+
+### 2026-10-25 安全加固与社区运营修复
+
+**安全加固**
+
+- 完成一轮全量安全审计与加固，覆盖认证与二次验证、权限边界、上传与媒体访问、备份脱敏、边缘层防护与部署默认配置。
+- 修复项已通过生产构建、类型检查与现有测试回归，未新增测试失败；不在此展开具体技术细节。
+
+**社区与后台**
+
+- 联合投稿人界面不再展示 `@用户名`；姓名展示、匿名投稿与隐藏学生信息策略保持不变。
+- 审帖员分配提示语与新权限模型一致：至少分配一个板块后才能审核对应板块，未分配 = 无审核权限。
+- 社区板块统计的审帖员总数按人去重（同一审帖员负责多个板块不再重复计数）。
+- 为 `CommunityPostImage.mediaId` 增加索引（迁移 72），优化媒体可见性校验。
+
+**配置提示**
+- compose 变体需显式提供 `JWT_SECRET`、`DB_PASSWORD`；密码请使用 URL 安全字符。
+- 建议配置 `NUXT_PUBLIC_HOST`（密码重置链接与部分安全校验依赖；未配置时回退到后台 OAuth 回调地址）。
+- 可选：`MEDIA_TOKEN_SECRET`（默认复用 `JWT_SECRET`）；独立审核服务的共享令牌在服务侧用 `MODERATION_SERVICE_TOKEN`、VoiceHub 侧用 `COMMUNITY_MODERATION_SERVICE_TOKEN`，两者需保持一致。
+- 行为变化：审帖员需分配板块；非超管不能修改统计代码或管理同级管理员；点歌券随机长度至少 8 位；社区发帖/评论新增频率限制；媒体图片按可见性鉴权。
+
+### 2026-10-24 回声社区归档、评论审核与共鸣称号
+
+- 作者可撤回自己的帖子/评论；管理员与审帖员可删除；数据先软删除留档 30 天，到期自动物理清理。
+- 管理后台新增「社区归档记录」，可查看归档帖子及其全部评论、归档评论，显示操作人、撤回/删除时间与待删除时间。
+- 评论与帖子一样进入审核流程，管理后台新增「社区评论审核」；评论不支持图片。
+- 发帖图片上限 9 张，单张超过 3MB 时浏览器优先压缩、服务端 sharp 兜底压缩。
+- 两位用户互相点赞对方投稿的歌曲各 50 首获得「共鸣」、各 100 首获得「70亿个灵魂都在找同个永恒」；称号只与首位达成伙伴绑定，伙伴与歌曲明细仅本人可见，通过站内消息与邮件推送，对外仅展示称号。
+
+### 2026-10-24 回声社区审核服务融合
+
+- 新增独立九宫格审核服务 `moderation-service/`（Python/FastAPI），基于阿里云内容安全 MultiModalAgent。
+- VoiceHub 通过 `COMMUNITY_MODERATION_SERVICE_URL` 接入：`PASS → APPROVED`，`MANUAL_REVIEW / API_UNAVAILABLE → PENDING`。
+- 未配置该变量时，完全回落到后台原有的阿里云直连审核，不改变既有部署。
+- 服务具备 Endpoint 故障切换、10 QPS 全局整形、SSRF 防护、DEGRADED 降级与中文部署文档，详见 [`moderation-service/README.md`](moderation-service/README.md)。
+
+### 2026-10-23 本轮更新
+
+**安全加固（22 个文件，语义级审计后修复）**
+
+- **全局错误脱敏（M-4）**：重写 `server/error.ts` 为 nitro 2.13.4 链式契约处理器——客户端只见通用文案，完整错误详情（含 stack）仅进服务端日志；修复了上游 `server/error.ts` 从未被编译进产物的问题
+- SSRF 防护、硬编码密钥清除、限流旁路修复、XFF 伪造修复、越权修复、用户名枚举修复等中低危修复共 17 项（明细见仓库内 `CUSTOM_CHANGES.md`）
+- 镜像改为**非 root 用户运行**
+
+**管理后台「攻击日志」面板增强**
+
+- **Bot 评分**：展示边缘安全层按登录会话累计的自动化风险评分，自动反查关联账号，支持账号过滤
+- **手动封禁 IP**：面板内填 IP 直接封禁（含防呆与审计记录）
+- **出口白名单管理**：增删可信 IP（绕过攻击锁定/地域闸），运行时生效并持久化
+- **地域访问限制开关**：开启后仅中国大陆 + CDN 回源 IP 可访问（IPv4/IPv6 双栈）
+- **IP 地理位置列**、三档列表改为固定高度滚动 + 表头吸顶
+
+**其他**
+
+- **移除原版上传到原作者服务器的错误上报功能**：Sentry 上报默认关闭，不向任何第三方上传数据
+- **修复换行符问题**：全库 CRLF 统一为 LF，并新增 `.gitattributes`（`* text=auto eol=lf`）避免今后混乱
+- `/analytics/` 独立看板服务下线（代码与配置从部署中整体移除）
+
+### 功能新增（社区版实现，冲突时优先于上游同名实现）
+
+1. **逐条投稿匿名**：投稿时可选「匿名投稿」。非管理员/非本人看到「匿名」，同时移除年级班级、联合投稿人及 `requesterId`/`cardCodeId` 等内部标识；管理员与投稿人本人仍可见真实姓名。与「隐藏学生信息」全局开关相互独立。
+2. **自动排期支持热度加权随机**：候选按「热度权重 × 秩归一化热度 + 随机」排序，默认热度权重 80%（后台滑杆 0~100% 可调），高票更容易靠前但不会退化为严格按票数排序；方案比较在同等优秀时优先更热。
+3. **后台「审核」栏**：公开备注审核（投稿留言公开前需审核）+ 用户审核（注册待审 / 真实姓名修改待审 / 注销宽限期账号）。
+4. **真实姓名修改申请**：用户提交后需管理员审核通过才生效；同一时间只允许一条待审申请；姓名仅允许中文。（后期本功能已删除）
+5. **账号自助注销**：需邮箱验证码确认；进入 30 天宽限期，期间登录一次即自动撤销注销；逾期由清理逻辑处理（投稿转入「已注销用户」占位账号，个人信息清除）。
+6. **首页公告栏**：后台可编辑文字或图片公告，多条自动轮播；每条可选「滚动显示」（超宽跑马灯）或「分行完整显示」；图片上传后存库并由 `/api/media/[id]` 转发。
+7. **邮件模板扩充**：注销（验证码/已受理/已完成/已撤销）、姓名审核（通过/驳回）、安全提醒（登录提醒、登录失败、密码修改/重置、邮箱绑定/解绑、两步验证开关、管理员重置密码）等，均可在后台「推送配置 → 邮件模板管理」编辑。
+8. **邮件发送不阻塞业务**：账号类通知异步发送，失败不影响主流程。
+9. **公告栏字号可调**：每条公告可选「小 / 标准 / 大」，手机端同步缩放；后台编辑器带实时预览。
+10. **投稿流程改版**：搜索结果卡片上的按钮改为「选歌」，选中后在「投稿留言」同一个框内显示已选歌曲，右下角「确认投稿」才真正提交；写留言与选歌不分先后，只有一个留言框。
+11. **点赞署名可选**：点👍时弹窗选择「匿名（显示为“一位同学”）」或「署名（通知里显示昵称）」，可勾选「保持该选择（以后不再询问）」；偏好存于账号（每次询问 / 总是匿名 / 总是署名），账号页可随时修改。投稿人的站内通知会按选择显示「一位同学」或具体昵称。
+12. **我的点赞**：账号页展示自己点赞过的歌曲列表。
+13. **新增界面中英双语**：公告栏编辑、后台审核、账号页（改名/注销/我的点赞）、排期「热度权重」、投稿确认条、点赞署名弹窗均支持中英切换（跟随站点语言），词条集中于 `app/utils/locale/newUi.ts`。
+
+### 安全与运营增强（管理员后台）
+
+- **管理员操作审计**：全部管理动作落库可查（`AdminAuditLog`），按 ADMIN / SUPER_ADMIN / SONG_ADMIN 分权守卫
+- **登录审计与攻击日志**：登录尝试落库（`LoginAttempt`）；边缘安全层上报暴力破解/枚举/脚本/地域阻断事件（`AttackLog`），管理面板可视化
+- **账号合规策略**：邮箱域名白名单（主流 + 教育邮箱放行、临时邮箱拦截）、用户名策略（禁中文/纯数字）、管理员下发的强制改密/改用户名（单用户 + 批量）
+- **密码流程人机验证**：找回 / 修改 / 重置密码统一接入 Cloudflare Turnstile
+- **备份触发令牌**：`timingSafeEqual` 防时序侧信道
+
+### 站点定制 / 行为调整
+
+- 投票速率误判修复（`baseThreshold` 与阈值倍数调整，避免正常投票被限流）
+- 注册接口限流放宽、IP 维度限流旁路（自建校园场景，按需自行收紧）
+- 站点 2FA TOTP 允许 ±30s 时钟偏差
+- 登录宽限期概念：注销后在宽限期内登录会自动撤销注销并提示用户
+- 登录会话有效期 7 天 → 6 小时（JWT / DB session / Cookie / 关闭自动续期）
+
+### 修复的老问题
+
+- 备份恢复接口调用了不存在的 `db.$transaction`（导致恢复功能不可用）→ 改为 `db.transaction`
+- 管理员用户接口使用了不存在的字段 `users.lastLoginAt` → 改为 `users.lastLogin`
+- `nuxt.config.ts` 中 9 个重复颜色键导致后者静默覆盖前者
+- 语言文件 `unbound` 一键两用导致「未绑定」状态显示成「平台已解绑」
+- 多处空值保护与类型修正（媒体上传返回、占位账号创建、同班同名提示等）
+
+### 已同步的上游版本
+
+**当前同步基线：上游 v1.6.0.5（2026-10-17）**
+
+本次同步带入的上游改动：
+
+- **系统看板**（仅超级管理员可见，`Admin/SystemBoard.vue`、`useHomeBootstrap` 等）
+- **全局投稿上限**（`enableGlobalSubmissionLimit` / 每日、每周、每月上限，新增迁移 `20261014082723_global_submission_limit`）
+- **匿名投稿**（上游 #626 官方实现；本仓库保留自己的实现，见上方「功能新增」第 1 条）
+- **自动排期热度加权**（上游 #625 官方实现；本仓库保留自己的实现，见上方第 2 条）
+- 首页唤醒锁、排期播放时段工具、Dockerfile 运行时缺模块修复、CI 与依赖更新
+
+> 冲突处理原则：**社区版已有功能保持不变**。上游与社区版重叠的匿名投稿 / 热度加权两处，
+> 采用社区版实现；`_journal.json` 采用双方迁移合并（共 63 条），并把上游新增的匿名迁移
+> 改为 `ADD COLUMN IF NOT EXISTS`，避免与社区版同功能迁移重复建列导致启动失败。
+
+</details>
+
+## 安装与使用
+
+完整的部署指南、环境变量说明、OAuth 配置、数据库迁移等，**全部保留在下方原项目 README 中**（从「[部署指南](#部署指南)」开始），本分支未改变原有安装流程的主体步骤。
+
+因本分支改动带来的差异，部署时请注意：
+
+| 差异点 | 说明 |
+|---|---|
+| `deploy/` 参考部署配置 | 新增 `deploy/` 目录：生产实践的 `docker-compose.yml`、`nginx/` 配置与边缘安全层 `rewriter/`（含中国 IP 段数据），可作参考或直接使用 |
+| 边缘安全层（可选） | `deploy/rewriter/app-rewriter.js` 是独立的 Node 反向代理（防暴力破解 / 脚本检测 / 攻击日志上报 / 地域闸），需要 `ATTACK_LOG_TOKEN` 等环境变量；不需要时应用可单独运行 |
+| 新增环境变量 | `ATTACK_LOG_TOKEN`（应用 ↔ 边缘层内部令牌）、`GEO_GATE`（地域闸默认状态，默认关闭）等，见 `deploy/.env.example` |
+| 站点外部地址 | 建议配置 `NUXT_PUBLIC_HOST`：密码重置链接与部分来源校验依赖；未配置时回退到后台 OAuth 回调地址，两者都没有时会拒绝发送重置邮件 |
+| compose 凭据 | compose 变体必须显式提供 `JWT_SECRET` 与 `DB_PASSWORD`，缺失会拒绝启动；密码请使用 URL 安全字符 |
+| 媒体/审核令牌（可选） | `MEDIA_TOKEN_SECRET`（默认复用 `JWT_SECRET`）；独立审核服务使用 `MODERATION_SERVICE_TOKEN` / `COMMUNITY_MODERATION_SERVICE_TOKEN`，两侧需一致 |
+| 非 root 运行 | Dockerfile 内置 `voicehub` 非 root 用户，容器不以 root 运行 |
+| 数据库迁移 | 新增多张审计/攻击日志/账号策略表，当前迁移数 72；迁移文件位于 `app/drizzle/migrations/`，升级时正常执行 `drizzle-kit migrate` 即可 |
+
+### 回声社区内容审核服务（可选）
+
+`moderation-service/` 是独立的 Python/FastAPI 审核服务，用于处理九宫格图文的并发审核、风险聚合与故障降级。VoiceHub 侧只需三个环境变量：
+
+| 环境变量 | 说明 |
+|---|---|
+| `COMMUNITY_PUBLIC_ORIGIN` | 图片公网地址（如 `https://voicehub.example.com`），用于拼接 `/api/media/{id}` |
+| `COMMUNITY_MODERATION_SERVICE_URL` | 独立服务地址，如 Docker 网络内 `http://moderation:8000`；**未配置时回落原有直连审核** |
+| `COMMUNITY_MODERATION_SERVICE_TIMEOUT_MS` | 调用独立服务的超时，默认 25000 毫秒 |
+
+处置映射：`PASS → APPROVED`（直接发布），`MANUAL_REVIEW / API_UNAVAILABLE → PENDING`（转人工）。后台命中策略为 `BLOCK` 且存在明确风险标签时仍可拦截；仅因服务不可用或图片失败不会误拦截。
+
+部署、环境变量、验收 curl 与安全说明见 [`moderation-service/README.md`](moderation-service/README.md)。**生产环境请只在内部网络暴露该服务，不要直接开放公网端口。**
+
+## 开源协议与版权声明
+
+- 本项目采用 **[GNU General Public License v3.0（GPL-3.0）](LICENSE)** 协议开源，与原项目一致。
+- **原版版权**：Copyright (C) 原作者 ([laoshuikaixue](https://github.com/laoshuikaixue))
+- **修改部分版权**：Copyright (C) 2026 [YH-Chen-Eternity](https://github.com/YH-Chen-Eternity)
+- 根据 GPL-3.0 协议，本修改版**同样以 GPL-3.0 开源**：您可以自由使用、学习、修改和再分发，但基于本项目的衍生作品也必须以 GPL-3.0 开源并提供对应源代码。
+- 原 `LICENSE` 文件及源码中的原始版权与免责声明均**未被删除或修改**。
+- 本仓库**不包含**任何学校标识/校徽等专属资源，请替换为自己的标识与配置。
+
+## 致谢
+
+- 感谢 **[laoshuikaixue](https://github.com/laoshuikaixue)** 的开源贡献——本项目正是在 [VoiceHub](https://github.com/laoshuikaixue/VoiceHub) 的基础上才得以诞生。
+- 感谢所有上游贡献者，以及 Nuxt、Vue、Drizzle、PostgreSQL、Redis、Cloudflare 等开源生态。
+
+## 赞赏支持（社区版维护者）
+
+本分支（VoiceHub-Plus）由 [YH-Chen-Eternity](https://github.com/YH-Chen-Eternity) 。
+
+如果 VoiceHub-Plus 帮到了你的站点，**欢迎扫码赞赏**，这会让这个项目走得更远 ☕
+
+<div align="center">
+
+<img width="220" alt="赞赏码" src=".github/donation-qrcode.png" />
+
+</div>
+
+> 说明：
+>
+> - 赞赏**完全自愿**，与本项目的 GPL-3.0 授权无关——不使用、不赞赏也完全可以自由使用本项目的全部功能。
+> - 赞赏**不提供**任何优先支持、定制开发或商业许可承诺；如需商业支持请另行沟通。
+> - 如果你更想支持**原作者**，请赞赏页面底部原项目的二维码（原项目的赞助入口归 laoshuikaixue 所有）。
+> - 本仓库的另两个项目：[VoiceHub 上游同步 fork](https://github.com/YH-Chen-Eternity/VoiceHub)（仅用于向上游提交 PR）、[抖音火花助手](https://github.com/YH-Chen-Eternity/douyin-spark)。
+
+---
+
+以下为**原项目 README**（完整保留，未做删改）：
+
 # VoiceHub - 校园广播站点歌系统
 
 这是一个使用Nuxt 4全栈框架开发的现代化校园广播站点歌管理系统。系统提供完整的点歌、投票、排期管理、通知推送、数据分析、权限控制和数据库管理功能，支持多角色权限管理和灵活的系统配置。
@@ -174,14 +515,18 @@ git clone https://github.com/laoshuikaixue/VoiceHub.git
 cd VoiceHub
 ```
 
-2. 修改 docker-compose.yml 中的环境变量
+2. 修改 docker-compose.yml 中的环境变量（或写入同目录 `.env`，compose 会自动读取）
 
 ```yaml
 environment:
   - DATABASE_URL=postgresql://user:password@postgres:5432/voicehub # 可能需要 ?sslmode=disable
   - JWT_SECRET=your-jwt-secret-here # 请修改为强随机字符串
+  - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-} # 初始管理员密码，至少 8 位；首次登录会强制改密
   - NODE_ENV=production
 ```
+
+> 初始管理员密码通过环境变量 `ADMIN_INITIAL_PASSWORD` 注入（可写在 `.env` 或 shell 环境中），
+> 仓库与镜像中不包含任何默认密码。首次启动会自动创建 `admin` 账号并强制改密。
 
 3. 启动服务
 
@@ -192,10 +537,13 @@ docker-compose up -d
 4. 访问应用
    打开浏览器访问 http://localhost:3000
 
-默认管理员账号：
+管理员账号（首次启动时由 `scripts/create-admin.js` 创建）：
 
 - 用户名：admin
-- 密码：admin123
+- 初始密码：由环境变量 `ADMIN_INITIAL_PASSWORD`（至少 8 位）指定，**首次登录会强制修改密码**
+- 未设置 `ADMIN_INITIAL_PASSWORD` 时不会创建管理员，容器会在启动日志中给出提示
+
+> 出于安全考虑，本项目不再提供 `admin123` 之类的公开默认密码；请在部署时通过环境变量或密钥管理服务注入初始密码。
 
 #### 方式二：使用预构建镜像
 
@@ -209,6 +557,7 @@ docker run -d \
   -e DATABASE_URL="postgresql://username:password@host:port/database?sslmode=require" \
   # 可能需要替换成 ?sslmode=disable
   -e JWT_SECRET="your-very-secure-jwt-secret-key" \
+  -e ADMIN_INITIAL_PASSWORD="your-strong-initial-admin-password" \
   -e NODE_ENV=production \
   --name voicehub \
   ghcr.io/laoshuikaixue/voicehub:latest
@@ -222,6 +571,7 @@ docker run -d \
   -e DATABASE_URL="postgresql://username:password@host:port/database?sslmode=require" \
   # 可能需要替换成 ?sslmode=disable
   -e JWT_SECRET="your-very-secure-jwt-secret-key" \
+  -e ADMIN_INITIAL_PASSWORD="your-strong-initial-admin-password" \
   -e NODE_ENV=production \
   --name voicehub \
   ghcr.nju.edu.cn/laoshuikaixue/voicehub:latest
@@ -244,6 +594,7 @@ docker run -d \
   -e DATABASE_URL="postgresql://username:password@host:port/database?sslmode=require" \
   # 可能需要替换成 ?sslmode=disable
   -e JWT_SECRET="your-very-secure-jwt-secret-key" \
+  -e ADMIN_INITIAL_PASSWORD="your-strong-initial-admin-password" \
   -e NODE_ENV=production \
   --name voicehub \
   voicehub
@@ -269,7 +620,8 @@ Podman 默认以当前用户身份运行，无需 `sudo`，安全性更高。但
 
 VoiceHub 现已支持飞牛 OS (FnOS) 的 `.fpk` 安装包。
 
-- 从 [GitHub Actions](https://github.com/laoshuikaixue/VoiceHub/actions/workflows/build-fpk.yml) 获取最新版本
+- 从 [GitHub Releases](https://github.com/laoshuikaixue/VoiceHub/releases) 获取最新版本（`.fpk` 随 Release 附带）
+- 或从 [GitHub Actions](https://github.com/laoshuikaixue/VoiceHub/actions/workflows/build-fpk.yml) 获取最新版本
 
 ### Nix / NixOS
 
@@ -361,6 +713,7 @@ NUXT_PUBLIC_HOST=https://voicehub.example.com
 推荐使用 [sops-nix](https://github.com/Mic92/sops-nix) 管理 secrets，避免明文存储在 Nix store 中。
 
 模块会自动设置 `DynamicUser`、`ProtectSystem=strict`、`NoNewPrivileges` 等安全加固。
+运行时可写数据（音源插件产物 `.data`、备份 `backups`、文件日志 `logs`）存放在 `/var/lib/voicehub`（systemd `StateDirectory`，`DynamicUser` 自动管理权限），升级重建不会丢失；只读产物仍来自 `/nix/store`。包内 `scripts/` 仅包含运行时脚本（deploy、db-sync、create-admin、build 等）；`pnpm run clear-db`、`pnpm run safe-migrate`、`pnpm run db:generate` 等维护命令需在源码仓库中执行。
 防火墙默认不开放端口，在配置中启用以允许外部访问：
 
 ```nix
@@ -502,6 +855,9 @@ DATABASE_URL="postgresql://username:password@host:port/database?sslmode=require"
 # JWT 认证密钥（必填）
 JWT_SECRET="your-very-secure-jwt-secret-key"
 
+# 初始管理员密码（首次执行 pnpm run create-admin 时必填，至少 8 位，首次登录会强制改密）
+ADMIN_INITIAL_PASSWORD="your-strong-initial-admin-password"
+
 # 应用运行环境（可选）
 NODE_ENV=development
 ```
@@ -526,16 +882,18 @@ pnpm run deploy
 
 5. 创建管理员账户
 
-系统会在首次部署时自动创建管理员账户。如需手动创建：
+系统会在首次部署时自动创建管理员账户（需先设置环境变量 `ADMIN_INITIAL_PASSWORD`，至少 8 位）。如需手动创建：
 
 ```bash
-pnpm run create-admin
+ADMIN_INITIAL_PASSWORD='你的初始密码（至少 8 位）' pnpm run create-admin
 ```
 
-默认管理员账户：
+管理员账户：
 
 - 用户名：admin
-- 密码：admin123
+- 初始密码：即上面 `ADMIN_INITIAL_PASSWORD` 的值，**首次登录会强制修改密码**
+
+> `create-admin` 已不再接受 `admin123` 等公开默认密码：必须显式提供 `ADMIN_INITIAL_PASSWORD`，否则脚本会拒绝创建并退出。
 
 6. 启动开发服务器
 
@@ -613,6 +971,8 @@ VoiceHub 提供了完整的站点配置管理功能，支持通过管理后台�
 - **通知类型**：配置不同类型通知的发送规则
 - **通知模板**：自定义通知消息的格式和内容
 
+> **AstrBot 群事件投递边界**：群事件 push 仅支持常驻部署。合并窗口到期后的冲刷依赖常驻服务的定时任务；Vercel、Netlify 等按请求冻结实例的 Serverless 环境应在 VoiceHub 与 AstrBot 插件两端均选择 pull 模式，由插件主动领取并回执。切换模式前确认旧队列已处理，避免旧模式遗留条目滞留。
+
 ### 数据库备份与恢复
 
 系统提供了完整的数据备份和恢复解决方案：
@@ -670,6 +1030,7 @@ VoiceHub 实现了细粒度的权限控制系统：
 | REDIS_URL              | 否   | Redis短期状态服务连接字符串，用于验证码、限流和临时锁定 | `redis://default:password@host:port`                                                                                                            |
 | REDIS_KEY_PREFIX       | 否   | Redis键命名空间，多环境共用Redis时应分别设置            | `voicehub:v2:`                                                                                                                                  |
 | NITRO_PRESET           | 否   | Nitro预设                                               | `vercel`                                                                                                                                        |
+| IS_SERVERLESS          | 否   | 声明为 Serverless 运行环境（连接池压低、备份改为直接返回数据、群事件投递器不启动）。平台未注入 `VERCEL`/`NETLIFY` 且未设置 `NITRO_PRESET` 时用它，如 EdgeOne Pages | `true` |
 | NUXT_PUBLIC_HOST       | 否   | 显式配置站点外部地址后启用内部 API 的 CORS 来源校验；未配置时仅对回环 Host（反向代理常见场景）跳过，云平台公开 Host 仍校验 | `https://your-app.com` |
 | NUXT_PUBLIC_SEO_CONFIG | 否   | 用于自定义 PWA/SEO 配置的 JSON 字符串                   | `{"title":"VoiceHub校园广播站点歌系统","shortName":"校园广播","description":"校园广播站点歌系统 - 让你的声音被听见","logo":"/images/logo.png"}` |
 
@@ -717,9 +1078,12 @@ VoiceHub/
 ├── .github/                   # GitHub 配置目录
 │   └── workflows/             # GitHub Actions 工作流
 │       ├── build-fpk.yml      # FnOS FPK 安装包构建
+│       ├── db-migrate-test.yml # 空库全量数据库迁移校验
+│       ├── release.yml        # Release 发布流程
 │       ├── docker-build.yml   # Docker 镜像构建
 │       ├── docker-postgres.yml # PostgreSQL Docker 镜像构建
-│       └── nix.yml            # Nix 构建校验与 pnpmDeps 哈希同步
+│       ├── nix.yml            # Nix 构建校验与 pnpmDeps 哈希同步
+│       └── nix-flake-update.yml # Nix flake inputs 月度更新
 ├── app/                       # Nuxt 4 应用主目录
 │   ├── app.vue                # 应用入口文件
 │   ├── assets/                # 静态资源目录
@@ -741,7 +1105,7 @@ VoiceHub/
 │   │           └── ModernLight.css # 现代浅色主题设计变量
 │   ├── components/            # Vue组件目录
 │   │   ├── Account/           # 账号管理组件
-│   │   │   └── SocialBindings.vue     # 社交账号绑定（邮箱/MeoW）
+│   │   │   └── SocialBindings.vue     # 社交账号绑定
 │   │   ├── Admin/             # 管理员功能组件
 │   │   │   ├── ApiKeyManager.vue      # API密钥管理
 │   │   │   ├── BackupAutoSettings.vue # 自动备份设置
@@ -774,6 +1138,7 @@ VoiceHub/
 │   │   │   ├── Sidebar.vue            # 管理后台侧边栏
 │   │   │   ├── SiteConfigManager.vue  # 站点配置管理
 │   │   │   ├── SmtpManager.vue        # SMTP邮件服务管理
+│   │   │   ├── SystemBoard.vue        # 系统看板（进程/数据库/表规模/生效配置/运行事件）
 │   │   │   ├── SongDownloadDialog.vue # 歌曲下载弹窗
 │   │   │   ├── SongManagement.vue     # 歌曲管理
 │   │   │   ├── SubmissionRemarkDialog.vue # 投稿备注弹窗
@@ -841,7 +1206,7 @@ VoiceHub/
 │   │   │   │   ├── ErrorBoundary.vue  # 错误边界组件
 │   │   │   │   ├── InputField.vue     # 通用输入框组件
 │   │   │   │   ├── LoadingState.vue   # 加载状态组件
-│   │   │   │   ├── MethodCard.vue     # 可展开卡片组件（带开关）
+│   │   │   │   ├── MethodCard.vue     # 可展开卡片组件
 │   │   │   │   ├── Pagination.vue     # 翻页组件
 │   │   │   │   ├── PasswordField.vue  # 密码输入框组件
 │   │   │   │   ├── Popover.vue        # 弹出框组件
@@ -884,6 +1249,7 @@ VoiceHub/
 │   │   ├── useBilibiliPreview.ts # Bilibili视频预览hooks
 │   │   ├── useChkszSource.ts   # ChKSz音源hooks
 │   │   ├── useErrorHandler.ts  # 错误处理hooks
+│   │   ├── useHomeBootstrap.ts # 首页首屏数据 SSR 预取hooks
 │   │   ├── useImportantNotification.ts # 重要通知全局状态与已读处理
 │   │   ├── useLegalConsentPrompt.js # 全局登录条款确认弹窗状态hooks
 │   │   ├── useLocaleText.ts   # i18n 文案访问与服务端错误码本地化hooks
@@ -910,9 +1276,10 @@ VoiceHub/
 │   │   ├── useSongPlayer.ts    # 歌曲播放器hooks
 │   │   ├── useSongs.ts         # 歌曲管理hooks
 │   │   ├── useSyncedTime.ts    # 服务器时间对时hooks
-│   │   ├── useTheme.ts         # 主题管理（深色/浅色/现代浅色切换）
+│   │   ├── useTheme.ts         # 主题管理
 │   │   ├── useThemeImage.ts    # 主题图片获取
 │   │   ├── useToast.ts         # Toast提示hooks
+│   │   ├── useWakeLock.ts      # 播放屏幕常亮(Wake Lock)hooks
 │   │   ├── useUserFilters.ts  # 用户过滤器hooks
 │   │   └── useZIndex.ts        # 浮层动态层级hooks
 │   ├── drizzle/               # 数据库相关
@@ -935,7 +1302,7 @@ VoiceHub/
 │   │   ├── forgot-password.vue # 找回密码页面
 │   │   ├── index.vue           # 首页
 │   │   ├── legal/              # 协议文档页面
-│   │   │   └── [slug].vue      # 协议文档内容页（按 slug 动态渲染）
+│   │   │   └── [slug].vue      # 协议文档内容页
 │   │   ├── login.vue           # 登录页面
 │   │   ├── notification-settings.vue # 通知设置页面
 │   │   ├── reset-password.vue  # 重置密码页面
@@ -948,7 +1315,7 @@ VoiceHub/
 │   ├── public/                # 静态文件目录
 │   │   ├── images/            # 图片资源
 │   │   │   └── beian.png      # 备案图标
-│   │   ├── themes/            # 主题图片（按主题分目录，仅 SVG 随主题切换）
+│   │   ├── themes/            # 主题图片
 │   │   │   ├── ClassicDark/          # 经典深色主题图片
 │   │   │   │   ├── logo.svg   # SVG格式Logo
 │   │   │   │   ├── search.svg # 搜索图标
@@ -1011,6 +1378,7 @@ VoiceHub/
 │       ├── password-policy.ts # 统一密码策略
 │       ├── oauth.ts           # OAuth工具
 │       ├── autoSchedule.ts    # 自动排期算法
+│       ├── schedulePlayTime.ts # 排期播出时段判定（带时段排期统计）
 │       ├── timeUtils.ts       # 时间工具
 │       ├── user-archive.ts    # 账号归档判定与筛选参数解析
 │       ├── webauthn.js        # WebAuthn浏览器兼容工具
@@ -1154,6 +1522,10 @@ VoiceHub/
 │   │   │   │   ├── index.post.ts    # 更新系统设置
 │   │   │   │   ├── index.ts         # 获取系统设置
 │   │   │   │   └── secretMask.ts    # 密钥脱敏工具
+│   │   │   ├── system-board/        # 系统看板API
+│   │   │   │   ├── events.get.ts    # 运行事件流（内存缓冲 + API错误 + 口令审计）
+│   │   │   │   ├── index.get.ts     # 看板快照（进程/数据库/表规模/生效配置）
+│   │   │   │   └── runtime-clear.post.ts # 清空运行事件缓冲
 │   │   │   └── users/               # 用户管理API
 │   │   │       ├── [id]/            # 用户详情操作子目录
 │   │   │       │   ├── reset-password.post.ts # 重置用户密码
@@ -1216,6 +1588,8 @@ VoiceHub/
 │   │   │   └── check.post.ts        # 检查黑名单
 │   │   ├── card-codes/     # 点歌券API
 │   │   │   └── validate.post.ts     # 验证点歌券可用性
+│   │   ├── captcha/        # 人机验证API
+│   │   │   └── verify.post.ts       # ESA 公共验证接口（边缘验签后签发短期凭证）
 │   │   ├── meow/           # MeoW账号绑定API
 │   │   │   ├── bind.post.ts         # 绑定MeoW账号
 │   │   │   └── unbind.post.ts       # 解绑MeoW账号
@@ -1243,9 +1617,10 @@ VoiceHub/
 │   │   │   │   ├── check-login.post.ts # 检查扫码登录情况
 │   │   │   │   ├── check-wx-login.post.ts # 检查微信扫码登录状态
 │   │   │   │   ├── login-qr.get.ts  # 获取QQ登录二维码
-│   │   │   │   └── login-qr-wx.get.ts # 获取微信登录二维码
+│   │   │   │   ├── login-qr-wx.get.ts # 获取微信登录二维码
 │   │   │   │   ├── playlist-songs.post.ts # 获取QQ音乐歌单内歌曲
-│   │   │   │   └── playlists.post.ts # 获取用户创建与收藏的歌单
+│   │   │   │   ├── playlists.post.ts # 获取用户创建与收藏的歌单
+│   │   │   │   └── resolve-mid.get.ts # QQ数字songId解析为字母songmid
 │   │   │   └── search/              # 搜索API
 │   │   │       ├── mg.get.ts        # 咪咕音乐搜索
 │   │   │       ├── tx.get.ts        # 腾讯音乐搜索
@@ -1253,6 +1628,11 @@ VoiceHub/
 │   │   ├── platform-config/  # 平台管理公开API
 │   │   │   └── index.get.ts      # 获取平台启用与排序配置
 │   │   ├── notifications/  # 通知系统API
+│   │   │   ├── astrbot/             # AstrBot 绑定码、状态、解绑与测试推送
+│   │   │   │   ├── bind-code.post.ts # 发放指定平台的绑定码
+│   │   │   │   ├── status.get.ts     # 查询四平台绑定状态
+│   │   │   │   ├── test.post.ts      # 向当前绑定目标发送测试推送
+│   │   │   │   └── unbind.post.ts    # 解除指定平台的绑定
 │   │   │   ├── [id]/                # 通知操作子目录
 │   │   │   │   └── read.post.ts     # 标记通知已读
 │   │   │   ├── [id].delete.ts       # 删除通知
@@ -1265,6 +1645,19 @@ VoiceHub/
 │   │   │   ├── read-all.post.ts     # 标记所有已读
 │   │   │   ├── settings.post.ts     # 更新通知设置
 │   │   │   └── settings.ts          # 获取通知设置
+│   │   ├── bot/            # AstrBot 插件令牌回调
+│   │   │   ├── voicehub/            # 私聊绑定、歌单与投递回调
+│   │   │   │   ├── bind.post.ts     # 一次性绑定码换取会话绑定
+│   │   │   │   ├── unbind.post.ts   # 机器人侧解绑当前会话
+│   │   │   │   ├── verify-targets.post.ts # 推送前核对私聊绑定、通知开关与群授权
+│   │   │   │   ├── pull.post.ts     # 领取待投递通知（pull 模式下插件轮询）
+│   │   │   │   ├── ack.post.ts      # 回执投递结果（claimToken 原样带回）
+│   │   │   │   ├── song-search.post.ts # 机器人侧点歌搜索
+│   │   │   │   ├── song-sources.get.ts # 机器人侧可用音源平台列表
+│   │   │   │   ├── song-resolve.post.ts # 机器人侧分享链接解析点歌
+│   │   │   │   ├── song-request.post.ts # 机器人侧点歌投稿
+│   │   │   │   ├── password-reset.post.ts # 机器人侧两步确认重置密码
+│   │   │   │   └── weekly-schedule.get.ts # 本周歌单（支持 format=text 纯文本）
 │   │   ├── open/           # 开放API（无需认证）
 │   │   │   ├── card-codes/          # 点歌券开放API
 │   │   │   │   └── delete.post.ts   # 删除点歌券（兼容不支持 DELETE body 的代理）
@@ -1371,17 +1764,32 @@ VoiceHub/
 │   │   ├── cardCodeLifecycleService.ts # 点歌券生命周期服务
 │   │   ├── durationValidationService.ts # 歌曲时长校验与补齐服务
 │   │   ├── meowNotificationService.ts # MeoW通知服务
+│   │   ├── astrbotNotificationService.ts # AstrBot通知服务
 │   │   ├── notificationService.ts # 通知服务
 │   │   ├── oauthConfigService.ts # OAuth提供商配置与状态服务
 │   │   ├── passwordSecurityService.ts # 密码操作审计与限流服务
 │   │   ├── securityService.ts # 安全服务
 │   │   ├── songRequestService.ts # 点歌投稿服务
 │   │   ├── smtpService.ts  # SMTP邮件服务
+│   │   ├── systemBoardService.ts # 系统看板数据聚合服务
 │   │   └── userService.ts # 用户服务
 │   ├── utils/              # 服务端工具函数
 │   │   ├── admin-password-policy.ts # 管理员重置密码基础校验策略
 │   │   ├── apiError.ts     # 统一错误码抛出助手 createApiError
 │   │   ├── apiKeyUtils.ts  # API Key生成、哈希与校验
+│   │   ├── astrbot-notification.ts # AstrBot 绑定码与目标校验
+│   │   ├── astrbot-adapters.js # 适配器平台映射（绑定鉴权与恢复共用）
+│   │   ├── astrbot-platforms.ts # 机器人四平台开关与目标筛选
+│   │   ├── astrbot-group.ts # 群广播目标与群事件配置规范化
+│   │   ├── astrbot-payload.ts # 推送请求体预算与分块
+│   │   ├── astrbot-pull.ts # pull 模式判定、取件序列化与回执校验
+│   │   ├── astrbot-share-link.ts # 点歌分享链接识别与 ID 提取
+│   │   ├── astrbot-song-search.ts # 机器人点歌统一音源搜索与候选归一化
+│   │   ├── astrbot-song-sources.ts # 机器人点歌各音源原始搜索取数
+│   │   ├── astrbot-password-reset.ts # 机器人重置密码两步确认密封令牌
+│   │   ├── astrbot-weekly-config.ts # 本周歌单显示配置与排版归一化（唯一权威）
+│   │   ├── astrbot-error-telemetry.ts # 群聊异常通知的脱敏与限长
+│   │   ├── astrbot-backup.ts # 四平台绑定备份恢复
 │   │   ├── auth.ts         # 认证工具函数
 │   │   ├── auth-route-policy.ts # 强制改密期间的接口访问策略
 │   │   ├── bilibiliWbi.ts  # Bilibili WBI签名工具
@@ -1449,6 +1857,7 @@ VoiceHub/
 │   │   ├── submission-restriction-policy.ts # 重复投稿限制模式判定
 │   │   ├── system-settings-defaults.ts # 系统设置默认值
 │   │   ├── system-settings-helper.ts # 系统设置读取与强制改密判断工具
+│   │   ├── system-event-buffer.ts # 系统看板进程内运行事件环形缓冲
 │   │   ├── theme-config.ts # 主题配置校验与解析工具
 │   │   ├── userDisplayName.ts # 同名用户消歧统一口径（仅在读用户参与统计）
 │   │   ├── telemetry.ts    # 遥测与错误追踪工具
@@ -1463,6 +1872,7 @@ VoiceHub/
 │   ├── build.js           # 输出环境变量解析结果并执行插件构建与 Nuxt 构建
 │   ├── build-music-source-plugins.ts # 生成 Serverless 音源插件部署快照
 │   ├── check-deploy.js    # 部署前检查
+│   ├── ci-update-pnpm-hash.py # Nix CI 读写 pnpmDeps 哈希
 │   ├── clear-database.js  # 清空数据库
 │   ├── create-admin.js    # 创建管理员账户
 │   ├── db-sync.js         # 数据库同步
@@ -1474,28 +1884,6 @@ VoiceHub/
 │   ├── redis-scan-legacy.js # 旧Redis业务缓存键dry-run扫描工具
 │   ├── reset-database.js  # 重置数据库
 │   └── safe-migrate.js    # 安全迁移（带备份）
-├── tests/                 # 自动化测试
-│   └── server/             # 服务端策略与安全测试
-│       ├── auth-route-policy.test.ts # 强制改密路由策略测试
-│       ├── cors-origin-policy.test.ts # CORS 来源协议匹配测试
-│       ├── cover-image-url.test.ts # 封面尺寸参数处理测试
-│       ├── esa-captcha.test.ts # 阿里云 ESA AI验证码区域与服务端节点解析测试
-│       ├── important-notification-policy.test.ts # 重要通知策略测试
-│       ├── initial-password-policy.test.ts # 初始密码状态策略测试
-│       ├── invalid-playback-urls.test.ts # 无效播放地址登记与淘汰测试
-│       ├── lyric-lrc-parse.test.ts # LRC 混合精度毫秒时间戳解析测试
-│       ├── music-source-plugin-platform.test.ts # 插件平台键解析测试
-│       ├── music-source-runtime.test.ts # 插件沙箱与网络策略测试
-│       ├── notification-history-policy.test.ts # 通知批次引用、筛选与分页策略测试
-│       ├── oauth-state-cookie.test.ts # OAuth state Cookie 安全测试
-│       ├── password-policy.test.ts # 密码策略测试
-│       ├── player-layout.test.ts # 播放器自由拖拽限位与偏好解析测试
-│       ├── qq-comment-normalize.test.ts # QQ音乐评论归一化测试
-│       ├── song-duration-policy.test.ts # 歌曲时长归一化与补齐决策测试
-│       ├── submission-restriction-policy.test.ts # 重复投稿限制模式判定测试
-│       ├── token-version-policy.test.ts # 令牌版本策略测试
-│       ├── user-archive.test.ts # 账号归档筛选参数解析测试
-│       └── user-avatar.test.ts # OAuth 头像来源解析测试
 ├── types/                 # TypeScript类型定义
 │   ├── global.d.ts         # 全局类型定义
 │   └── index.ts            # 通用类型定义
@@ -1644,7 +2032,7 @@ app/assets/css/themes/
 
 ### 管理员
 
-1. 使用管理员账号登录（默认账号：admin，密码：admin123）
+1. 使用管理员账号登录（账号：admin，密码：创建管理员时通过 `ADMIN_INITIAL_PASSWORD` 设置的初始密码；首次登录需改密）
 2. 进入管理后台，选择相应功能标签
 3. **排期管理**：可以看到左侧"待排歌曲"和右侧"播放顺序"
    - 通过拖拽将歌曲从左侧添加到右侧的排期列表
@@ -2384,6 +2772,10 @@ const transformMusicApiResponse = (response: any): any[] => {
 3. **提交规范**：
    - 请确保在提交 PR 前至少在本地测试过相关功能。
    - 请使用标准的 Git 提交规范。
+4. **署名与版权注释**：
+   - 本项目**不接受在源文件中添加个人版权注释**（如在文件末尾追加 `Copyright © ... 贡献者` 之类的署名行）。
+   - 贡献者署名**仅通过 Git 提交历史体现**；维护者在后续修改时会通过 `Co-authored-by:` trailer 保留你的贡献署名。
+   - 你保留自己贡献内容的版权，但请在提交 PR 前移除文件中的个人版权注释行，否则该 PR 无法按当前形式合并。
 
 ## 音乐服务免责声明
 

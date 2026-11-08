@@ -1,3 +1,4 @@
+// Modified by YH-Chen on 2026-10-17
 import { eq } from 'drizzle-orm'
 import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
@@ -8,6 +9,7 @@ import {
   recordPasswordAudit
 } from '~~/server/services/passwordSecurityService'
 import { createApiError } from '~~/server/utils/apiError'
+import { ROLE_RANK } from '~~/server/config/constants'
 import { getAdminPasswordViolation } from '~~/server/utils/admin-password-policy'
 
 export default defineEventHandler(async (event) => {
@@ -71,11 +73,13 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    // 越级保护：目标用户是 SUPER_ADMIN 时，操作者必须是 SUPER_ADMIN
-    if (targetUser.role === 'SUPER_ADMIN' && user.role !== 'SUPER_ADMIN') {
+    // 越级保护：不能重置同级或更高权限账号的密码
+    const actorRank = ROLE_RANK[user.role] ?? -1
+    const targetRank = ROLE_RANK[targetUser.role] ?? -1
+    if (user.role !== 'SUPER_ADMIN' && targetRank >= actorRank) {
       throw createError({
         statusCode: 403,
-        message: '权限不足：普通管理员无法重置超级管理员密码'
+        message: '权限不足：不能重置同级或更高权限账号的密码'
       })
     }
 
@@ -89,11 +93,22 @@ export default defineEventHandler(async (event) => {
       }
     })
 
+    // 通知本人（失败不影响重置结果）
+    try {
+      const targetId = Number(event.context.params?.id)
+      if (Number.isInteger(targetId) && targetId > 0) {
+        const { sendAccountEmail, formatMailTime } = await import('~~/server/utils/accountNotifications')
+        await sendAccountEmail(targetId, 'account.password.adminReset', { time: formatMailTime() })
+      }
+    } catch (mailError: any) {
+      console.error('发送管理员重置密码通知失败:', mailError)
+    }
+
     return {
       success: true,
       message: '密码重置成功'
     }
-  } catch (error) {
+  } catch (error: any) {
     await recordPasswordAudit(
       event,
       id,

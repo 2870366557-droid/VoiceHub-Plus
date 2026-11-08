@@ -48,6 +48,10 @@ export default defineEventHandler(async (event) => {
           dailySubmissionLimit: null,
           weeklySubmissionLimit: null,
           monthlySubmissionLimit: null,
+          enableGlobalSubmissionLimit: false,
+          globalDailySubmissionLimit: null,
+          globalWeeklySubmissionLimit: null,
+          globalMonthlySubmissionLimit: null,
           showBlacklistKeywords: false,
           enableCollaborativeSubmission: true,
           enableSubmissionRemarks: false,
@@ -65,7 +69,7 @@ export default defineEventHandler(async (event) => {
     }
 
     return maskSystemSettingsSecrets(settings)
-  } catch (error) {
+  } catch (error: any) {
     console.error('获取系统设置失败:', error)
     throw createError({
       statusCode: 500,

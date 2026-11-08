@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
 
 import fs from 'fs'
 import { execSync } from 'child_process'

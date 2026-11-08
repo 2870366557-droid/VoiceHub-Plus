@@ -1,0 +1,10 @@
+# 本地实际配置含站点信息，禁止入库
+automation.env
+*.env
+!automation.env.example
+
+# 本地生成的临时文件
+__pycache__/
+*.pyc
+*.bak
+*.log

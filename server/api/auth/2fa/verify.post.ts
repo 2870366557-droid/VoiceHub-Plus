@@ -1,4 +1,9 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import { db, userIdentities, eq, and, users, systemSettings } from '~/drizzle/db'
+import { getRequestHeader } from 'h3'
+import { notifyLoginSuccess } from '~~/server/utils/accountNotifications'
 import { JWTEnhanced } from '~~/server/utils/jwt-enhanced'
 import { createAuthSession } from '~~/server/utils/auth-session'
 import { getClientIP } from '~~/server/utils/ip-utils'
@@ -10,12 +15,14 @@ import {
   delStore,
   delStoreIfValue,
   getStore,
+  hashStateCode,
   incrStore,
   parseStoreJson,
   verifyStateCode
 } from '~~/server/utils/captchaStore'
 import otplib from 'otplib'
 import { createApiError } from '~~/server/utils/apiError'
+import { SERVER_ERROR_CODES } from '~~/server/config/constants'
 import {
   computeRequirePasswordChange,
   resolveRequirePasswordChange
@@ -23,6 +30,7 @@ import {
 import { getPasswordSetupState } from '~~/server/utils/initial-password-policy'
 import { canBindOAuthIdentity } from '~~/server/utils/auth-route-policy'
 import { syncOAuthIdentityAvatar } from '~~/server/utils/oauth-identity'
+import { recordLoginAttempt } from '~~/server/utils/loginAttempt'
 
 const { authenticator } = otplib
 const TOTP_FAILURE_LIMIT = 5
@@ -51,7 +59,7 @@ export default defineEventHandler(async (event) => {
       }
       targetUserId = decoded.userId
       preAuthPayload = decoded
-    } catch (e) {
+    } catch (e: any) {
       deleteCookie(event, 'pre-auth-token')
       throw createApiError(401, 'AUTH_SESSION_EXPIRED', '会话已失效，请重新登录')
     }
@@ -103,10 +111,25 @@ export default defineEventHandler(async (event) => {
       )
     }
 
+    // otplib 12 默认 window: 0（只认「当前」那一个 30 秒窗口），提交时刚好跨过边界
+    // 或手机时钟有几秒偏差就会失败，表现为「验证码时好时坏」。放宽到 ±1 个窗口（约 ±30 秒）。
+    // 注意：check() 的第三个参数**不会**覆盖实例选项，必须改实例的 options（已实测）。
+    authenticator.options = Object.assign({}, authenticator.options, { window: 1 })
     const totpValid = authenticator.check(code, identity.providerUserId)
 
     if (!totpValid) {
       throw createApiError(400, 'AUTH_TOTP_CODE_INVALID', '动态验证码错误')
+    }
+
+    // 一次性消费：±1 窗口内同一验证码只能通过一次，防止截获后重放
+    const usedKey = `2fa_totp_used:${targetUserId}:${hashStateCode('totp', code)}`
+    const usedCount = await incrStore(usedKey, 120)
+    if (usedCount > 1) {
+      throw createApiError(
+        400,
+        SERVER_ERROR_CODES.AUTH_TOTP_CODE_ALREADY_USED,
+        '动态验证码已使用，请等待下一个验证码'
+      )
     }
 
     await delStore(totpUserFailureKey)
@@ -168,7 +191,7 @@ export default defineEventHandler(async (event) => {
     let bindingPayload
     try {
       bindingPayload = verifyBindingToken(bindingToken)
-    } catch (e) {
+    } catch (e: any) {
       deleteCookie(event, 'binding-token')
       deleteCookie(event, 'pre-auth-token')
       throw createApiError(400, 'AUTH_BINDING_SESSION_INVALID', '绑定会话已失效，请重新发起绑定')
@@ -250,6 +273,15 @@ export default defineEventHandler(async (event) => {
     .where(eq(users.id, user.id))
     .catch((err) => console.error('Error updating user login info:', err))
 
+  await recordLoginAttempt(event, {
+    username: user.username,
+    result: 'success',
+    detail: `双因素验证通过（${type === 'totp' ? 'TOTP' : '邮箱'}）`
+  })
+
+  // 完成 2FA 即视为一次真实登录 → 发登录提醒（异步，不拖慢响应）
+  void notifyLoginSuccess(user, clientIp, getRequestHeader(event, 'user-agent') || '')
+
   // 生成Token
   const { token: authToken } = await createAuthSession(event, user, '2fa')
 
@@ -259,7 +291,7 @@ export default defineEventHandler(async (event) => {
     httpOnly: true,
     secure: isSecure,
     sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7,
+    maxAge: 60 * 60 * 6,
     path: '/'
   })
 
@@ -281,6 +313,7 @@ export default defineEventHandler(async (event) => {
       email: user.email,
       emailVerified: user.emailVerified,
       forcePasswordChange: user.forcePasswordChange,
+      forceUsernameChange: user.forceUsernameChange,
       passwordChangedAt: user.passwordChangedAt,
       requirePasswordChange,
       // 兼容旧客户端字段名

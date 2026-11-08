@@ -1,3 +1,8 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+<!--
+Modified by YH-Chen on 2026-10-17
+-->
 <template>
   <div class="bg-bg-secondary-30 border border-border-secondary rounded-[2rem] overflow-hidden">
     <!-- 头部 -->
@@ -33,64 +38,70 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-12 min-h-[650px]">
+    <div class="grid grid-cols-1 lg:grid-cols-12 lg:h-[650px] min-h-[650px]">
       <!-- 左侧：模板列表 -->
-      <div class="lg:col-span-3 border-r border-border-secondary bg-bg-secondary-10 flex flex-col">
+      <div class="lg:col-span-3 border-r border-border-secondary bg-bg-secondary-10 flex flex-col min-h-0">
         <div class="p-4 border-b border-border-secondary-50">
           <div class="relative">
             <Search :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-text-disabled" />
             <input
+              v-model="searchQuery"
               type="text"
               :placeholder="locale.searchPlaceholder"
               class="w-full bg-bg-primary border border-border-secondary rounded-lg pl-9 pr-3 py-2 text-[10px] text-text-tertiary focus:outline-none focus:border-primary-30"
             >
           </div>
         </div>
-        <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-          <button
-            v-for="t in templates"
-            :key="t.key"
-            class="w-full group flex flex-col gap-1 p-3 rounded-2xl transition-all text-left border"
-            :class="[
-              selectedKey === t.key
-                ? 'bg-primary-hover-10 border-primary-20'
-                : 'bg-transparent border-transparent hover:bg-bg-tertiary-40'
-            ]"
-            @click="select(t)"
-          >
-            <div class="flex items-center justify-between">
-              <span
-                class="text-[11px] font-black tracking-tight transition-colors"
-                :class="
-                  selectedKey === t.key
-                    ? 'text-primary'
-                    : 'text-text-secondary group-hover:text-text-primary'
-                "
-              >
-                {{ t.name }}
-              </span>
-              <div class="flex gap-1">
-                <span
-                  v-if="t.isBuiltin && !t.isOverridden"
-                  class="px-1.5 py-0.5 rounded-md bg-bg-tertiary text-[8px] font-black text-text-tertiary uppercase tracking-tighter"
-                >
-                  {{ locale.builtin }}
-                </span>
-                <span
-                  v-if="t.isOverridden"
-                  class="px-1.5 py-0.5 rounded-md bg-success-10 text-[8px] font-black text-success uppercase tracking-tighter"
-                >
-                  {{ locale.custom }}
-                </span>
-              </div>
+        <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-2 space-y-1 max-h-[60vh] lg:max-h-none">
+          <template v-for="group in groupedTemplates" :key="group.id">
+            <div class="px-2 pt-3 pb-1 text-[9px] font-black text-text-disabled uppercase tracking-widest">
+              {{ group.label }}
             </div>
-            <span class="text-[9px] font-bold text-text-disabled font-mono">{{ t.key }}</span>
-          </button>
+            <button
+              v-for="t in group.items"
+              :key="t.key"
+              class="w-full group flex flex-col gap-1 p-3 rounded-2xl transition-all text-left border"
+              :class="[
+                selectedKey === t.key
+                  ? 'bg-primary-hover-10 border-primary-20'
+                  : 'bg-transparent border-transparent hover:bg-bg-tertiary-40'
+              ]"
+              @click="select(t)"
+            >
+              <div class="flex items-center justify-between">
+                <span
+                  class="text-[11px] font-black tracking-tight transition-colors"
+                  :class="
+                    selectedKey === t.key
+                      ? 'text-primary'
+                      : 'text-text-secondary group-hover:text-text-primary'
+                  "
+                >
+                  {{ t.name }}
+                </span>
+                <div class="flex gap-1">
+                  <span
+                    v-if="t.isBuiltin && !t.isOverridden"
+                    class="px-1.5 py-0.5 rounded-md bg-bg-tertiary text-[8px] font-black text-text-tertiary uppercase tracking-tighter"
+                  >
+                    {{ locale.builtin }}
+                  </span>
+                  <span
+                    v-if="t.isOverridden"
+                    class="px-1.5 py-0.5 rounded-md bg-success-10 text-[8px] font-black text-success uppercase tracking-tighter"
+                  >
+                    {{ locale.custom }}
+                  </span>
+                </div>
+              </div>
+              <span class="text-[9px] font-bold text-text-disabled font-mono">{{ t.key }}</span>
+            </button>
+          </template>
         </div>
       </div>
 
       <!-- 右侧：编辑器区域 -->
-      <div class="lg:col-span-9 flex flex-col bg-bg-primary-20 overflow-hidden">
+      <div class="lg:col-span-9 flex flex-col bg-bg-primary-20 overflow-hidden min-h-0">
         <div v-if="selected" class="flex-1 overflow-y-auto custom-scrollbar p-8">
           <div class="max-w-4xl mx-auto space-y-8">
             <!-- 基础信息与主题 -->
@@ -135,12 +146,7 @@
                   {{ locale.availableVariables }}
                 </h4>
                 <p class="text-[11px] text-text-tertiary leading-relaxed font-mono">
-                  <template v-if="selected.key === 'verification.code'">
-                    <span v-pre>{{ name }}, {{ email }}, {{ code }}, {{ expiresInMinutes }}</span>
-                  </template>
-                  <template v-else>
-                    <span v-pre>{{ title }}, {{ message }}, {{ actionUrl }}, {{ fromName }}</span>
-                  </template>
+                  <span>{{ variableHintText }}</span>
                 </p>
               </div>
             </div>
@@ -202,7 +208,7 @@
                   </button>
                 </div>
                 <div class="rounded-2xl overflow-hidden border border-border-secondary bg-bg-secondary shadow-2xl">
-                  <iframe :srcdoc="previewHtml" class="w-full h-[500px] border-none" />
+                  <iframe :srcdoc="previewHtml" sandbox="" class="w-full h-[500px] border-none" />
                 </div>
               </div>
             </Transition>
@@ -237,6 +243,7 @@ type TemplateItem = {
   name: string
   subject: string
   html: string
+  variables?: string[] | null
   isBuiltin: boolean
   isOverridden?: boolean
 }
@@ -255,6 +262,7 @@ const getLocaleText = (section: string, key: string, fallback = '') => {
   return locale.value?.[section]?.[key] || fallback
 }
 const templates = ref<TemplateItem[]>([])
+const searchQuery = ref('')
 const selectedKey = ref<string>('')
 const form = ref<{ key: string; name: string; subject: string; html: string }>({
   key: '',
@@ -268,6 +276,68 @@ const previewSubject = ref<string>('')
 
 const selected = computed(() => templates.value.find((t) => t.key === selectedKey.value))
 
+const CATEGORY_ORDER = ['notification', 'community', 'account', 'other'] as const
+function categoryOf(key: string): (typeof CATEGORY_ORDER)[number] {
+  if (key.startsWith('notification.')) return 'notification'
+  if (key.startsWith('community.')) return 'community'
+  if (key.startsWith('account.') || key.startsWith('verification.') || key.startsWith('register')) {
+    return 'account'
+  }
+  return 'other'
+}
+
+const filteredTemplates = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return templates.value
+  return templates.value.filter(
+    (t) =>
+      t.name.toLowerCase().includes(q) ||
+      t.key.toLowerCase().includes(q) ||
+      t.subject.toLowerCase().includes(q)
+  )
+})
+
+const groupedTemplates = computed(() => {
+  const labels: Record<string, string> = {
+    notification: locale.value.groupNotification || '通知推送',
+    community: locale.value.groupCommunity || '回声社区',
+    account: locale.value.groupAccount || '账号与安全',
+    other: locale.value.groupOther || '其他'
+  }
+  const groups = new Map<string, TemplateItem[]>()
+  for (const t of filteredTemplates.value) {
+    const category = categoryOf(t.key)
+    if (!groups.has(category)) groups.set(category, [])
+    groups.get(category)!.push(t)
+  }
+  return CATEGORY_ORDER.filter((category) => groups.has(category)).map((category) => ({
+    id: category,
+    label: labels[category],
+    items: groups.get(category)!
+  }))
+})
+
+// 可用变量展示：优先用服务端给出的 variables，其次按模板类型兜底（保证所有模板界面一致）
+const CODE_VARIABLES = ['name', 'email', 'code', 'expiresInMinutes']
+const GENERIC_VARIABLES = ['title', 'message', 'actionUrl', 'fromName']
+const variableHintText = computed(() => {
+  const key = selected.value?.key || ''
+  const vars =
+    selected.value?.variables?.length
+      ? selected.value.variables
+      : key.startsWith('verification.code')
+        ? CODE_VARIABLES
+        : GENERIC_VARIABLES
+  return vars.map((v) => `{{ ${v} }}`).join(', ')
+})
+
+// 预览示例数据：让每个模板点「预览」都能看到接近真实的邮件
+const PREVIEW_SAMPLES: Record<string, Record<string, any>> = {
+  'account.deletion.scheduled': { username: '示例用户', graceDays: 30, scheduledAt: '2026-11-10 15:00:00' },
+  'account.deletion.completed': { username: '示例用户', deletedAt: '2026-11-10 15:00:00' },
+  'account.deletion.cancelled': { username: '示例用户', reason: '宽限期内登录了本站', cancelledAt: '2026-10-12 09:00:00' }
+}
+
 async function loadList() {
   const res: any = await $fetch('/api/admin/email-templates')
   const list = Array.isArray(res?.templates) ? res.templates : []
@@ -276,6 +346,7 @@ async function loadList() {
     name: String(t.name),
     subject: String(t.subject),
     html: String(t.html),
+    variables: Array.isArray(t.variables) && t.variables.length ? t.variables.map((v: any) => String(v)) : null,
     isBuiltin: !!t.isBuiltin,
     isOverridden: !!t.isOverridden
   }))
@@ -320,7 +391,8 @@ async function restore() {
 async function doPreview() {
   try {
     const defaultData =
-      form.value.key === 'verification.code'
+      PREVIEW_SAMPLES[form.value.key] ||
+      (form.value.key.startsWith('verification.code')
         ? {
             name: locale.value?.previewData?.name || 'Example User',
             email: 'example@school.edu',
@@ -331,7 +403,7 @@ async function doPreview() {
             title: locale.value?.previewData?.title || 'System Notification',
             message: locale.value?.previewData?.message || 'This is preview content.\nLine breaks and links are supported.',
             actionUrl: 'https://example.com'
-          }
+          })
     const res = await $fetch('/api/admin/email-templates/preview', {
       method: 'POST',
       body: { key: form.value.key, data: defaultData }

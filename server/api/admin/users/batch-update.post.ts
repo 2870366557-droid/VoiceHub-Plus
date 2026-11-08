@@ -1,7 +1,10 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import { z } from 'zod'
 import { db } from '~/drizzle/db'
 import { users, userStatusLogs } from '~/drizzle/schema'
 import { and, eq, inArray, ne } from 'drizzle-orm'
+import { validateUsernameFormat } from '~~/server/utils/username-policy'
 
 // 请求体验证模式
 const batchUpdateSchema = z.object({
@@ -129,6 +132,16 @@ export default defineEventHandler(async (event) => {
         if (update.username !== undefined && update.username.trim()) {
           const newUsername = update.username.trim()
 
+          // 用户名格式：禁中文、2-20 位、禁纯数字
+          const usernameFormatError = validateUsernameFormat(newUsername)
+          if (usernameFormatError) {
+            errors.push({
+              userId: update.userId,
+              error: usernameFormatError.message
+            })
+            continue
+          }
+
           // 检查用户名是否已存在（排除当前用户）
           const existingUser = await db
             .select({ id: users.id })
@@ -196,7 +209,7 @@ export default defineEventHandler(async (event) => {
         })
 
         updateResults.push(updatedUser)
-      } catch (error) {
+      } catch (error: any) {
         console.error(`处理用户 ${update.userId} 更新时出错:`, error)
         errors.push({
           userId: update.userId,
@@ -226,7 +239,7 @@ export default defineEventHandler(async (event) => {
     }
 
     return response
-  } catch (error) {
+  } catch (error: any) {
     console.error('批量更新用户失败:', error)
 
     // 如果是已知错误，直接抛出

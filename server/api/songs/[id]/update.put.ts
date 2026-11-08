@@ -163,6 +163,11 @@ export default defineEventHandler(async (event) => {
       updateData.submissionNotePublicStatus = notePublic ? SUBMISSION_NOTE_STATUS.APPROVED : null
     }
 
+    // 管理员可在后台直接设置单曲匿名状态，不受站点 allowAnonymousSubmission 开关限制
+    if ('submissionAnonymous' in body) {
+      updateData.submissionAnonymous = body.submissionAnonymous === true
+    }
+
     const currentRequesterId = updateData.requesterId || existingSong.requesterId
 
     // 如果指定了 replayRequestId 且本次携带备注可见性变更，则更新对应重播申请（条件更新，避免隐性重置）
@@ -326,6 +331,7 @@ export default defineEventHandler(async (event) => {
         durationSeconds: songs.durationSeconds,
         submissionNote: songs.submissionNote,
         submissionNotePublic: songs.submissionNotePublic,
+        submissionAnonymous: songs.submissionAnonymous,
         requesterId: songs.requesterId,
         createdAt: songs.createdAt,
         updatedAt: songs.updatedAt,
@@ -344,7 +350,7 @@ export default defineEventHandler(async (event) => {
       success: true,
       song: updatedSong[0]
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Update song error:', error)
 
     // 业务错误（带 statusCode）直接透传

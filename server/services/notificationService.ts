@@ -1,3 +1,4 @@
+// Modified by YH-Chen on 2026-10-17
 import { db } from '~/drizzle/db'
 import {
   notifications,
@@ -12,6 +13,7 @@ import {
 import { and, eq, gte, inArray } from 'drizzle-orm'
 import { sendBatchMeowNotifications, sendMeowNotificationToUser } from './meowNotificationService'
 import { sendBatchEmailNotifications, sendEmailNotificationToUser } from './smtpService'
+import { sendAstrbotNotificationToUser, sendBatchAstrbotNotifications } from './astrbotNotificationService'
 import { formatDateTime, getBeijingTime } from '~/utils/timeUtils'
 import { getSystemSettingsCached } from '~~/server/utils/system-settings-helper'
 import {
@@ -21,6 +23,15 @@ import {
   type NotificationSenderInput
 } from '~~/server/utils/important-notification-policy'
 import { randomUUID } from 'node:crypto'
+
+/** AstrBot 私聊投递失败不阻断业务流程：统一吞异常并记日志。 */
+async function sendAstrbotToUserSafely(userId: number, title: string, content: string) {
+  try {
+    await sendAstrbotNotificationToUser(userId, title, content)
+  } catch (error: any) {
+    console.error(`发送 AstrBot 通知失败 (User: ${userId}):`, error)
+  }
+}
 
 /**
  * 创建联合投稿邀请通知
@@ -54,7 +65,7 @@ export async function createCollaborationInvitationNotification(
     // 发送外部通知（MeoW, Email等）
     try {
       await sendMeowNotificationToUser(inviteeId, '收到联合投稿邀请', message)
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送 MeoW 通知失败:', error)
     }
 
@@ -71,12 +82,14 @@ export async function createCollaborationInvitationNotification(
           songTitle
         }
       )
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送邮件通知失败:', error)
     }
 
+    await sendAstrbotToUserSafely(inviteeId, '收到联合投稿邀请', message)
+
     return notificationResult[0]
-  } catch (error) {
+  } catch (error: any) {
     console.error('创建联合投稿邀请通知失败:', error)
     return null
   }
@@ -112,8 +125,10 @@ export async function createCollaborationResponseNotification(
       })
       .returning()
 
+    await sendAstrbotToUserSafely(inviterId, '联合投稿邀请回复', message)
+
     return notificationResult[0]
-  } catch (error) {
+  } catch (error: any) {
     console.error('创建联合投稿回复通知失败:', error)
     return null
   }
@@ -281,7 +296,7 @@ async function sendSongSelectedNotification(
     // 同步发送 MeoW 通知
     try {
       await sendMeowNotificationToUser(userId, text.meowTitle, message)
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送 MeoW 通知失败:', error)
     }
 
@@ -303,12 +318,14 @@ async function sendSongSelectedNotification(
               : ''
         }
       )
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送邮件通知失败:', error)
     }
 
+    await sendAstrbotToUserSafely(userId, text.meowTitle, message)
+
     return notificationResult[0]
-  } catch (err) {
+  } catch (err: any) {
     return null
   }
 }
@@ -378,52 +395,67 @@ function formatDate(date: Date): string {
 }
 
 /**
- * 创建歌曲已播放的通知
+ * 创建歌曲已播放的通知（同一用户多首歌曲合并为一条）
  */
-export async function createSongPlayedNotification(songId: number) {
+export async function createSongPlayedNotifications(songIds: number[]) {
   try {
+    if (songIds.length === 0) {
+      return []
+    }
+
     // 获取歌曲信息
-    const songResult = await db.select().from(songs).where(eq(songs.id, songId)).limit(1)
-    const song = songResult[0]
+    const songList = await db.select().from(songs).where(inArray(songs.id, songIds))
 
-    if (!song) {
-      return null
+    if (songList.length === 0) {
+      return []
     }
 
-    // 获取用户通知设置
-    const settingsResult = await db
-      .select()
-      .from(notificationSettings)
-      .where(eq(notificationSettings.userId, song.requesterId))
-      .limit(1)
-    const settings = settingsResult[0]
-
-    // 如果用户关闭了此类通知，则不发送
-    if (settings && !settings.songPlayedEnabled) {
-      return null
-    }
-
-    // 创建通知
-    const message = `您投稿的歌曲《${song.title}》已播放。`
-
-    // 获取所有关联用户（投稿人 + 联合投稿人）
-    const userIdsToNotify = [song.requesterId]
-
-    // 获取联合投稿人
-    const collaborators = await db
+    // 获取所有歌曲已接受的联合投稿人
+    const collaboratorRows = await db
       .select()
       .from(songCollaborators)
-      .where(and(eq(songCollaborators.songId, songId), eq(songCollaborators.status, 'ACCEPTED')))
+      .where(
+        and(
+          inArray(songCollaborators.songId, songList.map((s) => s.id)),
+          eq(songCollaborators.status, 'ACCEPTED')
+        )
+      )
 
-    collaborators.forEach((c) => {
-      if (!userIdsToNotify.includes(c.userId)) {
-        userIdsToNotify.push(c.userId)
+    // 按用户分组：投稿人取其投稿歌曲，联合投稿人取其参与歌曲
+    interface SongPlayedGroup {
+      requestedTitles: string[]
+      collaboratedTitles: string[]
+      songIds: Set<number>
+    }
+    const groups = new Map<number, SongPlayedGroup>()
+    const ensureGroup = (userId: number): SongPlayedGroup => {
+      let group = groups.get(userId)
+      if (!group) {
+        group = { requestedTitles: [], collaboratedTitles: [], songIds: new Set() }
+        groups.set(userId, group)
       }
-    })
+      return group
+    }
+
+    for (const song of songList) {
+      const group = ensureGroup(song.requesterId)
+      group.requestedTitles.push(song.title)
+      group.songIds.add(song.id)
+    }
+
+    for (const collaborator of collaboratorRows) {
+      const song = songList.find((s) => s.id === collaborator.songId)
+      if (!song) continue
+      // 投稿人不再重复计入联合投稿
+      if (song.requesterId === collaborator.userId) continue
+      const group = ensureGroup(collaborator.userId)
+      group.collaboratedTitles.push(song.title)
+      group.songIds.add(song.id)
+    }
 
     const notificationsCreated = []
 
-    for (const targetUserId of userIdsToNotify) {
+    for (const [targetUserId, group] of groups) {
       try {
         // 获取用户通知设置
         const settingsResult = await db
@@ -438,10 +470,21 @@ export async function createSongPlayedNotification(songId: number) {
           continue
         }
 
-        const userMessage =
-          targetUserId === song.requesterId
-            ? message
-            : `您参与联合投稿的歌曲《${song.title}》已播放。`
+        // 多首歌曲名以《A、B、C》合并，投稿与联合投稿分别成句
+        const messageParts = []
+        if (group.requestedTitles.length > 0) {
+          messageParts.push(`您投稿的歌曲《${group.requestedTitles.join('、')}》已播放。`)
+        }
+        if (group.collaboratedTitles.length > 0) {
+          messageParts.push(
+            `您参与联合投稿的歌曲《${group.collaboratedTitles.join('、')}》已播放。`
+          )
+        }
+        const userMessage = messageParts.join('')
+        const songTitleText = [...group.requestedTitles, ...group.collaboratedTitles].join('、')
+
+        // 合并多首歌曲时不再指向单首歌曲
+        const singleSongId = group.songIds.size === 1 ? [...group.songIds][0]! : null
 
         const notificationResult = await db
           .insert(notifications)
@@ -449,7 +492,7 @@ export async function createSongPlayedNotification(songId: number) {
             userId: targetUserId,
             type: 'SONG_PLAYED',
             message: userMessage,
-            songId: songId
+            songId: singleSongId
           })
           .returning()
         notificationsCreated.push(notificationResult[0])
@@ -457,7 +500,7 @@ export async function createSongPlayedNotification(songId: number) {
         // 同步发送 MeoW 通知
         try {
           await sendMeowNotificationToUser(targetUserId, '歌曲已播放', userMessage)
-        } catch (error) {
+        } catch (error: any) {
           console.error(`发送 MeoW 通知失败 (User: ${targetUserId}):`, error)
         }
 
@@ -470,27 +513,36 @@ export async function createSongPlayedNotification(songId: number) {
             undefined,
             'notification.songPlayed',
             {
-              songTitle: song.title
+              songTitle: songTitleText
             }
           )
-        } catch (error) {
+        } catch (error: any) {
           console.error(`发送邮件通知失败 (User: ${targetUserId}):`, error)
         }
-      } catch (err) {
+        await sendAstrbotToUserSafely(targetUserId, '歌曲已播放', userMessage)
+      } catch (err: any) {
         console.error(`处理播放通知失败 (User: ${targetUserId}):`, err)
       }
     }
 
-    return notificationsCreated.length > 0 ? notificationsCreated[0] : null
-  } catch (err) {
-    return null
+    return notificationsCreated
+  } catch (err: any) {
+    return []
   }
+}
+
+/**
+ * 创建单首歌曲已播放的通知
+ */
+export async function createSongPlayedNotification(songId: number) {
+  const created = await createSongPlayedNotifications([songId])
+  return created[0] || null
 }
 
 /**
  * 创建歌曲获得投票的通知
  */
-export async function createSongVotedNotification(songId: number, voterId: number) {
+export async function createSongVotedNotification(songId: number, voterId: number, revealToRequester = true) {
   try {
     // 获取歌曲信息
     const songResult = await db.select().from(songs).where(eq(songs.id, songId)).limit(1)
@@ -535,7 +587,9 @@ export async function createSongVotedNotification(songId: number, voterId: numbe
       return null
     }
 
-    const message = `您投稿的歌曲《${song.title}》获得了一个新的投票，当前共有 ${songVotes.length} 个投票。`
+    const voterDisplayName = String(voter.name || voter.username || '').trim()
+      const voterLabel = revealToRequester && voterDisplayName ? `${voterDisplayName} ` : '一位同学'
+      const message = `您投稿的歌曲《${song.title}》获得了 ${voterLabel}的投票，当前共有 ${songVotes.length} 个投票。`
 
     // 防重复通知：检查最近5分钟内是否有相同歌曲的投票通知
     const fiveMinutesAgo = new Date(getBeijingTime().getTime() - 5 * 60 * 1000)
@@ -584,7 +638,7 @@ export async function createSongVotedNotification(songId: number, voterId: numbe
     // 同步发送 MeoW 通知
     try {
       await sendMeowNotificationToUser(song.requesterId, '收到新投票', message)
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送 MeoW 通知失败:', error)
     }
 
@@ -601,12 +655,14 @@ export async function createSongVotedNotification(songId: number, voterId: numbe
           votesCount: songVotes.length
         }
       )
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送邮件通知失败:', error)
     }
 
+    await sendAstrbotToUserSafely(song.requesterId, '收到新投票', message)
+
     return notification
-  } catch (err) {
+  } catch (err: any) {
     return null
   }
 }
@@ -614,73 +670,94 @@ export async function createSongVotedNotification(songId: number, voterId: numbe
 /**
  * 创建歌曲驳回通知
  */
-export async function createSongRejectedNotification(
+export function buildSongRejectedMessage(
+  songInfo: { title: string; artist: string },
+  reason: string
+): string {
+  return `您投稿的歌曲《${songInfo.title} - ${songInfo.artist}》已被管理员驳回。驳回原因：${reason}`
+}
+
+/**
+ * 站内驳回通知落库（尊重用户全局通知开关）。传入事务句柄时，通知与驳回删除原子提交，
+ * 杜绝 fire-and-forget 在进程回收/异常时静默丢失。返回是否落库，供调用方决定是否再异步外发。
+ */
+export async function insertSongRejectedNotification(
+  dbOrTx: any,
   userId: number,
   songInfo: { title: string; artist: string },
   reason: string
-) {
-  try {
-    // 获取用户通知设置
-    const settingsResult = await db
-      .select()
-      .from(notificationSettings)
-      .where(eq(notificationSettings.userId, userId))
-      .limit(1)
-    const settings = settingsResult[0]
-
-    // 如果用户关闭了通知，则不发送
-    if (settings && !settings.enabled) {
-      return null
-    }
-
-    // 创建通知消息
-    const message = `您投稿的歌曲《${songInfo.title} - ${songInfo.artist}》已被管理员驳回。驳回原因：${reason}`
-
-    // 创建站内通知
-    let notification
-    try {
-      const notificationResult = await db
-        .insert(notifications)
-        .values({
-          userId,
-          type: 'SONG_REJECTED',
-          message
-        })
-        .returning()
-      notification = notificationResult[0]
-    } catch (error) {
-      throw error
-    }
-
-    // 同步发送 MeoW 通知
-    try {
-      await sendMeowNotificationToUser(userId, '歌曲被驳回', message)
-    } catch (error) {
-      console.error('发送 MeoW 通知失败:', error)
-    }
-
-    // 同步发送邮件通知
-    try {
-      await sendEmailNotificationToUser(
-        userId,
-        '歌曲被驳回',
-        message,
-        undefined,
-        'notification.songRejected',
-        {
-          songTitle: `${songInfo.title} - ${songInfo.artist}`,
-          reason
-        }
-      )
-    } catch (error) {
-      console.error('发送邮件通知失败:', error)
-    }
-
-    return notification
-  } catch (err) {
-    console.error('创建歌曲驳回通知失败:', err)
-    return null
+): Promise<{ created: boolean; message: string }> {
+  const message = buildSongRejectedMessage(songInfo, reason)
+  const settingsResult = await dbOrTx
+    .select({ enabled: notificationSettings.enabled })
+    .from(notificationSettings)
+    .where(eq(notificationSettings.userId, userId))
+    .limit(1)
+  const settings = settingsResult[0]
+  if (settings && settings.enabled === false) {
+    return { created: false, message }
   }
+  await dbOrTx.insert(notifications).values({ userId, type: 'SONG_REJECTED', message })
+  return { created: true, message }
+}
+
+/**
+ * 批量场景：在同一事务内为多首被驳回歌曲落库站内通知，一次性查出相关用户开关避免逐条查询拖长事务。
+ * 返回需要继续异步外发（邮件/MeoW/AstrBot）的条目。
+ */
+export async function insertSongRejectedNotificationsBulk(
+  dbOrTx: any,
+  songs: Array<{ requesterId: number | null; title: string; artist: string }>,
+  reason: string
+): Promise<Array<{ userId: number; title: string; artist: string; message: string }>> {
+  const targetIds = [
+    ...new Set(songs.map((s) => s.requesterId).filter((id): id is number => id != null))
+  ]
+  if (targetIds.length === 0) return []
+
+  const settingsRows = await dbOrTx
+    .select({ userId: notificationSettings.userId, enabled: notificationSettings.enabled })
+    .from(notificationSettings)
+    .where(inArray(notificationSettings.userId, targetIds))
+  const disabled = new Set(
+    settingsRows.filter((r: any) => r.enabled === false).map((r: any) => r.userId)
+  )
+
+  const created: Array<{ userId: number; title: string; artist: string; message: string }> = []
+  for (const song of songs) {
+    if (song.requesterId == null || disabled.has(song.requesterId)) continue
+    const message = buildSongRejectedMessage(song, reason)
+    await dbOrTx.insert(notifications).values({ userId: song.requesterId, type: 'SONG_REJECTED', message })
+    created.push({ userId: song.requesterId, title: song.title, artist: song.artist, message })
+  }
+  return created
+}
+
+/** 驳回通知的异步外发通道（MeoW / 邮件 / AstrBot），各自失败仅记日志、不抛出。 */
+export async function dispatchSongRejectedChannels(
+  userId: number,
+  songInfo: { title: string; artist: string },
+  reason: string,
+  message: string
+): Promise<void> {
+  try {
+    await sendMeowNotificationToUser(userId, '歌曲被驳回', message)
+  } catch (error: any) {
+    console.error('发送 MeoW 通知失败:', error)
+  }
+  try {
+    await sendEmailNotificationToUser(
+      userId,
+      '歌曲被驳回',
+      message,
+      undefined,
+      'notification.songRejected',
+      { songTitle: `${songInfo.title} - ${songInfo.artist}`, reason }
+    )
+  } catch (error: any) {
+    console.error('发送邮件通知失败:', error)
+  }
+  await sendAstrbotToUserSafely(userId, '歌曲被驳回', message)
 }
 
 export async function createSubmissionNoteClearedNotification(
@@ -703,7 +780,7 @@ export async function createSubmissionNoteClearedNotification(
       : `您投稿歌曲《${songInfo.title} - ${songInfo.artist}》的备注已被管理员清空。`
 
     return await createBatchSystemNotifications(uniqueUserIds, title, content)
-  } catch (error) {
+  } catch (error: any) {
     console.error('创建歌曲备注清空通知失败:', error)
     return []
   }
@@ -755,19 +832,21 @@ export async function createSystemNotification(
     // 同步发送 MeoW 通知
     try {
       await sendMeowNotificationToUser(userId, title, content)
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送 MeoW 通知失败:', error)
     }
 
     // 同步发送邮件通知
     try {
       await sendEmailNotificationToUser(userId, title, content)
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送邮件通知失败:', error)
     }
 
+    await sendAstrbotToUserSafely(userId, title, content)
+
     return notification
-  } catch (err) {
+  } catch (err: any) {
     return null
   }
 }
@@ -842,7 +921,7 @@ export async function createBatchSystemNotifications(
     let meowResults = { success: 0, failed: 0 }
     try {
       meowResults = await sendBatchMeowNotifications(userIds, title, content)
-    } catch (error) {
+    } catch (error: any) {
       console.error('批量发送 MeoW 通知失败:', error)
     }
 
@@ -850,17 +929,27 @@ export async function createBatchSystemNotifications(
     let emailResults = { success: 0, failed: 0 }
     try {
       emailResults = await sendBatchEmailNotifications(userIds, title, content)
-    } catch (error) {
+    } catch (error: any) {
       console.error('批量发送邮件通知失败:', error)
+    }
+
+    let astrbotResults = { success: 0, failed: 0 }
+    try {
+      astrbotResults = await sendBatchAstrbotNotifications(
+        notificationsToCreate.map((row) => row.userId), title, content
+      )
+    } catch (error: any) {
+      console.error('批量发送 AstrBot 通知失败:', error)
     }
 
     return {
       count: notificationCount.count,
       total: userIds.length,
       meowNotifications: meowResults,
-      emailNotifications: emailResults
+      emailNotifications: emailResults,
+      astrbotNotifications: astrbotResults
     }
-  } catch (err) {
+  } catch (err: any) {
     return null
   }
 }
@@ -890,37 +979,30 @@ export async function createReplayRequestRejectedNotification(
     const message = `您的重播申请《${songInfo.title}》已被管理员拒绝。`
 
     // 创建站内通知
-    let notification
-    try {
-      const notificationResult = await db
-        .insert(notifications)
-        .values({
-          userId,
-          type: 'REPLAY_REJECTED',
-          message
-        })
-        .returning()
-      notification = notificationResult[0]
-    } catch (error) {
-      throw error
-    }
+    const notificationResult = await db
+      .insert(notifications)
+      .values({ userId, type: 'REPLAY_REJECTED', message })
+      .returning()
+    const notification = notificationResult[0]
 
     // 同步发送 MeoW 通知
     try {
       await sendMeowNotificationToUser(userId, '重播申请已拒绝', message)
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送 MeoW 通知失败:', error)
     }
 
     // 同步发送邮件通知
     try {
       await sendEmailNotificationToUser(userId, '重播申请已拒绝', message)
-    } catch (error) {
+    } catch (error: any) {
       console.error('发送邮件通知失败:', error)
     }
 
+    await sendAstrbotToUserSafely(userId, '重播申请已拒绝', message)
+
     return notification
-  } catch (err) {
+  } catch (err: any) {
     console.error('创建重播申请拒绝通知失败:', err)
     return null
   }

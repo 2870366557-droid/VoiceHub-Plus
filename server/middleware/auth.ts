@@ -1,3 +1,6 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import { JWTEnhanced } from '../utils/jwt-enhanced'
 import type { H3Event } from 'h3'
 import { db } from '~/drizzle/db'
@@ -14,7 +17,7 @@ import {
 } from '../utils/auth-route-policy'
 import { getPasswordSetupState } from '../utils/initial-password-policy'
 import { createApiError } from '../utils/apiError'
-import { SERVER_ERROR_CODES } from '../config/constants'
+import { BOT_ROUTES, SERVER_ERROR_CODES } from '../config/constants'
 import {
   ensureAuthSession,
   isAuthSessionStorageError,
@@ -41,6 +44,11 @@ export default defineEventHandler(async (event) => {
   const url = getRequestURL(event)
   const pathname = url.pathname
   const method = event.method.toUpperCase()
+
+  // 机器人回调只接受专用共享令牌，由接口自身校验；忽略浏览器残留 Cookie。
+  if (BOT_ROUTES.has(`${method} ${pathname}`)) {
+    return
+  }
 
   // 跳过非API路由
   if (!pathname.startsWith('/api/')) {
@@ -125,7 +133,7 @@ export default defineEventHandler(async (event) => {
         httpOnly: true,
         secure: isSecure,
         sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 7, // 7天
+        maxAge: 60 * 60 * 6, // 6小时
         path: '/'
       })
     }
@@ -155,7 +163,8 @@ export default defineEventHandler(async (event) => {
     const user = userResult[0] || null
 
     // 用户不存在或状态异常时token无效
-    if (!user || user.status !== 'active') {
+    // pending_deletion = 自助注销宽限期内，仍然允许访问（登录即撤销注销）
+    if (!user || (user.status !== 'active' && user.status !== 'pending_deletion')) {
       if (degradeToAnonymous(true)) return
       clearAuthCookie(event)
 
@@ -167,7 +176,9 @@ export default defineEventHandler(async (event) => {
             ? '该账号已毕业，限制访问'
             : user.status === 'pending'
               ? '账号待管理员审核，请耐心等待'
-              : '该账号已被禁用'
+              : user.status === 'merged'
+                ? '该账号已合并到你的原账号，请用原账号登录（忘记密码可用邮箱重置）'
+                : '该账号已被禁用'
 
       return sendError(
         event,
@@ -182,7 +193,9 @@ export default defineEventHandler(async (event) => {
                   ? SERVER_ERROR_CODES.AUTH_ACCOUNT_WITHDRAWN
                   : user?.status === 'graduate'
                     ? SERVER_ERROR_CODES.AUTH_ACCOUNT_GRADUATED
-                    : SERVER_ERROR_CODES.AUTH_ACCOUNT_DISABLED_OR_RESTRICTED
+                    : user?.status === 'merged'
+                      ? SERVER_ERROR_CODES.AUTH_ACCOUNT_MERGED
+                      : SERVER_ERROR_CODES.AUTH_ACCOUNT_DISABLED_OR_RESTRICTED
           }
         })
       )
@@ -209,7 +222,7 @@ export default defineEventHandler(async (event) => {
       if (authSession) {
         await touchAuthSession(authSession.id, Boolean(newToken))
       }
-    } catch (sessionError) {
+    } catch (sessionError: any) {
       console.error('[Auth] 会话存储处理失败:', sessionError)
       if (isAuthSessionStorageError(sessionError)) {
         // 登出必须允许清除 Cookie，即使会话表当前不可用。
@@ -265,7 +278,7 @@ export default defineEventHandler(async (event) => {
     let requirePasswordChange = false
     try {
       requirePasswordChange = await resolveRequirePasswordChange(user)
-    } catch (error) {
+    } catch (error: any) {
       // 配置依赖故障时放行核心请求，避免缓存或数据库抖动造成全站重定向雪崩。
       console.error('[Auth] 读取强制改密策略失败，按放行策略降级:', error)
     }
@@ -313,10 +326,14 @@ export default defineEventHandler(async (event) => {
       )
     }
 
-    // 检查管理员专用路由
+    // 检查管理员专用路由；放歌员的具体只读范围由 zz-admin-guard 限制。
+    // 审帖员只允许进入 /api/admin/community/*（具体接口内部再校验板块/角色）。
+    const isReviewerCommunityAdminPath =
+      user.role === 'REVIEWER' && pathname.startsWith('/api/admin/community/')
     if (
       pathname.startsWith('/api/admin') &&
-      !['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN'].includes(user.role)
+      !['ADMIN', 'SUPER_ADMIN', 'SONG_ADMIN', 'BROADCASTER'].includes(user.role) &&
+      !isReviewerCommunityAdminPath
     ) {
       return sendError(
         event,

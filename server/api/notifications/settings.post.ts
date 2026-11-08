@@ -1,7 +1,8 @@
+// Modified by YH-Chen on 2026-10-17
 import { db } from '~/drizzle/db'
 import { notificationSettings } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
-import type { NotificationSettings } from '~/types'
+import type { NotificationSettings } from '~~/types'
 
 export default defineEventHandler(async (event) => {
   // 检查用户认证
@@ -103,7 +104,7 @@ export default defineEventHandler(async (event) => {
       data: settings,
       message: '通知设置保存成功'
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error('更新通知设置失败:', err)
     throw createError({
       statusCode: 500,

@@ -1,12 +1,32 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import { verifyAuthenticationResponse } from '@simplewebauthn/server'
+import { defineEventHandler, getRequestHeader, setCookie } from 'h3'
+import { notifyLoginSuccess } from '~~/server/utils/accountNotifications'
 import { getWebAuthnChallenge, clearWebAuthnChallenge } from '~~/server/utils/webauthn-token'
 import { getWebAuthnConfig } from '~~/server/utils/webauthn-config'
-import { db, eq, and, userIdentities } from '~/drizzle/db'
-import { defineEventHandler, setCookie } from 'h3'
+import { db, eq, and, userIdentities, users } from '~/drizzle/db'
 import { createAuthSession } from '~~/server/utils/auth-session'
+import { getBeijingTime } from '~/utils/timeUtils'
+import { getClientIP } from '~~/server/utils/ip-utils'
 import { createApiError } from '~~/server/utils/apiError'
+import { SERVER_ERROR_CODES } from '~~/server/config/constants'
+import { checkDistributedRateLimit } from '~~/server/utils/rateLimiter'
+import { isUserBlocked, getUserBlockRemainingTime } from '~~/server/services/securityService'
+import { recordLoginAttempt } from '~~/server/utils/loginAttempt'
 
 export default defineEventHandler(async (event) => {
+  const clientIp = getClientIP(event)
+  const rateLimit = await checkDistributedRateLimit(`webauthn_login_ip:${clientIp}`, 20, 5 * 60 * 1000)
+  if (!rateLimit.isAllowed) {
+    throw createApiError(
+      429,
+      SERVER_ERROR_CODES.AUTH_RATE_LIMITED_MINUTES,
+      '验证尝试过于频繁，请稍后重试'
+    )
+  }
+
   const body = await readBody(event)
   const challengeData = getWebAuthnChallenge(event)
 
@@ -40,6 +60,22 @@ export default defineEventHandler(async (event) => {
   // 检查用户账号状态
   if (!user || user.status !== 'active') {
     throw createApiError(403, 'AUTH_ACCOUNT_UNAVAILABLE_OR_RESTRICTED', '该账号不可用或已限制访问')
+  }
+
+  // 与密码登录同口径的风控：被临时限制的账号不能靠通行密钥绕过
+  if (isUserBlocked(user.id)) {
+    const remaining = getUserBlockRemainingTime(user.id)
+    void recordLoginAttempt(event, {
+      username: user.username,
+      result: 'account_locked',
+      detail: `通行密钥登录被风控拦截，剩余 ${remaining} 分钟`
+    })
+    throw createApiError(
+      401,
+      SERVER_ERROR_CODES.AUTH_IP_BLOCKED_RETRY_MINUTES,
+      `账户处于风险控制期，请等待 ${remaining} 分钟后重试`,
+      { params: [remaining] }
+    )
   }
 
   // 解析存储的凭证数据
@@ -96,24 +132,51 @@ export default defineEventHandler(async (event) => {
         .set({ providerUsername: JSON.stringify(credentialData) })
         .where(eq(userIdentities.id, identity.id))
 
+      // 与密码登录保持一致：通行密钥登录同样要刷新「最后登录 / 登录 IP」
+      // （2026-10-11 修正：此前这条路径完全不更新，用指纹/密钥登录的人在后台看不到登录 IP）
+      await db
+        .update(users)
+        .set({ lastLogin: getBeijingTime(), lastLoginIp: getClientIP(event) })
+        .where(eq(users.id, user.id))
+        .catch((err) => console.error('Error updating user login info (webauthn):', err))
+
+      // 通行密钥登录同样发登录提醒（异步，不拖慢响应）
+      void notifyLoginSuccess(user, getClientIP(event) || '', getRequestHeader(event, 'user-agent') || '')
+
+      await recordLoginAttempt(event, {
+        username: user.username,
+        result: 'success',
+        detail: '通行密钥验证通过'
+      })
+
       // 签发登录 Token
       const { token } = await createAuthSession(event, identity.user, 'webauthn')
       setCookie(event, 'auth-token', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 7,
+        maxAge: 60 * 60 * 6,
         path: '/'
       })
 
       return { success: true, redirect: '/' }
     } else {
+      void recordLoginAttempt(event, {
+        username: user.username,
+        result: 'wrong_password',
+        detail: '通行密钥验证失败'
+      })
       throw createApiError(400, 'AUTH_VERIFICATION_FAILED', '验证失败')
     }
-  } catch (error) {
+  } catch (error: any) {
     // 透传已携带错误码的业务错误，避免被重新包装后丢失 code 通道。
     if (error && typeof error === 'object' && 'statusCode' in error) throw error
     console.error('WebAuthn 登录验证失败:', error)
+    void recordLoginAttempt(event, {
+      username: user?.username,
+      result: 'wrong_password',
+      detail: '通行密钥验证异常'
+    })
     const message = error instanceof Error ? error.message : '验证失败'
     throw createApiError(400, 'AUTH_VERIFICATION_FAILED', message)
   }

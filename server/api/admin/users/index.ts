@@ -1,3 +1,4 @@
+// Modified by YH-Chen on 2026-10-17
 import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { asc } from 'drizzle-orm'
@@ -22,7 +23,7 @@ export default defineEventHandler(async (event) => {
         role: users.role,
         grade: users.grade,
         class: users.class,
-        lastLoginAt: users.lastLoginAt,
+        lastLoginAt: users.lastLogin,
         lastLoginIp: users.lastLoginIp,
         passwordChangedAt: users.passwordChangedAt
       })
@@ -30,7 +31,7 @@ export default defineEventHandler(async (event) => {
       .orderBy(asc(users.id))
 
     return usersList
-  } catch (error) {
+  } catch (error: any) {
     console.error('获取用户列表失败:', error)
     throw createError({
       statusCode: 500,

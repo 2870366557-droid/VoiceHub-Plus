@@ -1,3 +1,6 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import nodemailer from 'nodemailer'
 import { db } from '~/drizzle/db'
 import { emailTemplates, users } from '~/drizzle/schema'
@@ -95,6 +98,13 @@ export class SmtpService {
     generic: `
       <div style="white-space: pre-wrap;">{{message}}</div>
     `,
+    reviewBacklog: `
+      <p>后台待审核内容已超过阈值，请及时处理：</p>
+      {{#if postCount}}<p>· 待审核帖子：<strong>{{postCount}}</strong> 条</p>{{/if}}
+      {{#if commentCount}}<p>· 待审核评论：<strong>{{commentCount}}</strong> 条</p>{{/if}}
+      {{#if userCount}}<p>· 待审核注册用户：<strong>{{userCount}}</strong> 人</p>{{/if}}
+      <p style="color:#888">积压的内容在审核通过前不会对同学展示。</p>
+    `,
     songSelected: `
       <p>您投稿的歌曲《{{songTitle}}》已被安排播放。</p>
       <p>播放日期：<strong>{{playDate}}</strong></p>
@@ -124,6 +134,76 @@ export class SmtpService {
     `,
     collaborationInvite: `
       <p>用户 <strong>{{inviterName}}</strong> 邀请您共同投稿歌曲《{{songTitle}}》。</p>
+    `,
+    accountDeletionScheduled: `
+      <p>您好 <strong>{{username}}</strong>，您的账号注销申请已受理。</p>
+      <p>账号数据将<b>保留 {{graceDays}} 天</b>，计划清理时间：<strong>{{scheduledAt}}</strong>。</p>
+      <p style="color: #c0392b;">在清理之前，只要<b>登录一次本站</b>即可自动撤销注销、恢复账号；逾期未登录，账号信息将被清理。</p>
+      <p>如果这不是您本人的操作，请立即登录并修改密码。</p>
+    `,
+    accountDeletionCompleted: `
+      <p>您好 <strong>{{username}}</strong>，您的账号已于 <strong>{{deletedAt}}</strong> 完成注销。</p>
+      <p>账号信息（昵称、姓名、邮箱、密码、登录方式）已清理；您此前的投稿记录已转为「已注销用户」保留在歌曲列表中。</p>
+      <p>如果这是误操作，请联系广播站管理员协助处理。</p>
+    `,
+    accountDeletionCancelled: `
+      <p>您好 <strong>{{username}}</strong>，您的账号注销申请已撤销（{{cancelledAt}}），账号已恢复正常使用。</p>
+      <p>本次撤销原因：{{reason}}。</p>
+    `,
+    accountLoginAlert: `
+      <p>您好 <strong>{{username}}</strong>，您的账号刚刚在新位置登录。</p>
+      <p>登录时间：<strong>{{time}}</strong><br>登录 IP：<strong>{{ip}}</strong>{{#if device}}<br>设备：{{device}}{{/if}}</p>
+      <p style="color: #c0392b;"><b>如果不是本人操作</b>，请立即登录并修改密码；<b>如果是本人操作</b>，忽略本邮件即可。</p>
+    `,
+    accountLoginFailed: `
+      <p>您好 <strong>{{username}}</strong>，您的账号在短时间内出现了多次密码错误的登录尝试。</p>
+      <p>最近时间：<strong>{{time}}</strong><br>来源 IP：<strong>{{ip}}</strong><br>连续失败次数：<strong>{{failCount}}</strong></p>
+      <p style="color: #c0392b;">如果<b>不是本人</b>在尝试登录，说明密码可能已泄露，请尽快通过「忘记密码」重置密码；如果是本人输错了，忽略本邮件即可。</p>
+    `,
+    passwordChanged: `
+      <p>您好 <strong>{{username}}</strong>，您的账号密码已修改成功。</p>
+      <p>修改时间：<strong>{{time}}</strong>{{#if ip}}<br>来源 IP：<strong>{{ip}}</strong>{{/if}}</p>
+      <p style="color: #c0392b;">如果<b>不是本人操作</b>，请立即使用「忘记密码」重置密码并联系管理员。</p>
+    `,
+    passwordReset: `
+      <p>您好 <strong>{{username}}</strong>，您的账号密码已通过邮箱重置成功。</p>
+      <p>重置时间：<strong>{{time}}</strong>{{#if ip}}<br>来源 IP：<strong>{{ip}}</strong>{{/if}}</p>
+      <p>如果<b>不是本人操作</b>，请尽快联系广播站管理员。</p>
+    `,
+    emailBound: `
+      <p>您好 <strong>{{username}}</strong>，您的账号已成功绑定邮箱 <strong>{{email}}</strong>。</p>
+      <p>绑定时间：<strong>{{time}}</strong></p>
+      <p>此后你可以使用该邮箱找回密码、接收审核与注销通知。不是本人操作请立即联系管理员。</p>
+    `,
+    emailUnbound: `
+      <p>您好 <strong>{{username}}</strong>，您的账号已解绑邮箱 <strong>{{oldEmail}}</strong>。</p>
+      <p>操作时间：<strong>{{time}}</strong></p>
+      <p>解绑后将无法通过邮箱找回密码，如需重新绑定请在「账号」页面操作。</p>
+    `,
+    twoFactorEnabled: `
+      <p>您好 <strong>{{username}}</strong>，您的账号已<b>开启</b>两步验证（2FA）。</p>
+      <p>操作时间：<strong>{{time}}</strong></p>
+      <p>此后登录需要额外输入动态验证码。不是本人操作请立即联系管理员。</p>
+    `,
+    twoFactorDisabled: `
+      <p>您好 <strong>{{username}}</strong>，您的账号已<b>关闭</b>两步验证（2FA）。</p>
+      <p>操作时间：<strong>{{time}}</strong></p>
+      <p style="color: #c0392b;">关闭后账号安全性会下降。不是本人操作请立即重新开启并修改密码。</p>
+    `,
+    passwordAdminReset: `
+      <p>您好 <strong>{{username}}</strong>，管理员已为你的账号<b>重置密码</b>。</p>
+      <p>操作时间：<strong>{{time}}</strong></p>
+      <p>请使用管理员提供的新密码登录，并在登录后立即在「账号」页面修改为你自己的密码。</p>
+    `,
+    communityResonanceAwarded: `
+      <p>恭喜你！你与 <strong>{{partnerName}}</strong> 达成双向投稿互赞，获得称号「<strong>{{titleName}}</strong>」。</p>
+      <p>你点赞了 TA 投稿的 <strong>{{sentCount}}</strong> 首；TA 点赞了你投稿的 <strong>{{receivedCount}}</strong> 首。</p>
+      <p>你点赞 TA 的歌曲：</p>
+      <div style="white-space: pre-wrap; background: #f8f9fa; border-radius: 4px; padding: 12px;">{{sentSongList}}</div>
+      <p>TA 点赞你的歌曲：</p>
+      <div style="white-space: pre-wrap; background: #f8f9fa; border-radius: 4px; padding: 12px;">{{receivedSongList}}</div>
+      <p>达成时间：<strong>{{achievedAt}}</strong></p>
+      <p style="color: #888;">该记录仅你本人可见；对外仅展示你所佩戴的称号。</p>
     `
   }
 
@@ -136,13 +216,31 @@ export class SmtpService {
       contentType: string
       headerSubtitle: string
       actionText?: string
+      /** 模板可用变量（后台模板界面统一展示用） */
+      variables?: string[]
     }
   > = {
     'verification.code': {
       name: '邮箱验证码',
       subject: '邮箱验证码 | {{siteTitle}}',
       contentType: 'verification',
-      headerSubtitle: '邮箱验证'
+      headerSubtitle: '邮箱验证',
+      variables: ['name', 'email', 'code', 'expiresInMinutes']
+    },
+    'verification.code.deletion': {
+      name: '注销账号验证码',
+      subject: '注销账号验证码 | {{siteTitle}}',
+      contentType: 'verification',
+      headerSubtitle: '注销账号验证',
+      variables: ['name', 'email', 'code', 'expiresInMinutes']
+    },
+    'community-review-backlog': {
+      name: '社区审核积压提醒',
+      subject: '{{title}} | {{siteTitle}}通知推送',
+      contentType: 'reviewBacklog',
+      headerSubtitle: '内容审核提醒',
+      actionText: '前往处理',
+      variables: ['title', 'postCount', 'commentCount', 'userCount', 'actionUrl']
     },
     'register': {
       name: '注册通知',
@@ -168,6 +266,13 @@ export class SmtpService {
       contentType: 'generic',
       headerSubtitle: '通知推送',
       actionText: '查看详情'
+    },
+    'community.resonance.awarded': {
+      name: '回声社区：获得共鸣称号',
+      subject: '获得「{{titleName}}」称号 | {{siteTitle}}通知推送',
+      contentType: 'communityResonanceAwarded',
+      headerSubtitle: '回声社区',
+      variables: ['titleName', 'partnerName', 'sentCount', 'receivedCount', 'mutualCount', 'sentSongList', 'receivedSongList', 'achievedAt']
     },
     'notification.songSelected': {
       name: '歌曲被选中',
@@ -204,6 +309,90 @@ export class SmtpService {
       subject: '收到联合投稿邀请 | {{siteTitle}}通知推送',
       contentType: 'collaborationInvite',
       headerSubtitle: '通知推送'
+    },
+    'account.deletion.scheduled': {
+      name: '注销申请已受理',
+      subject: '账号注销申请已受理 | {{siteTitle}}',
+      contentType: 'accountDeletionScheduled',
+      headerSubtitle: '账号注销',
+      variables: ['username', 'graceDays', 'scheduledAt']
+    },
+    'account.deletion.completed': {
+      name: '账号已注销',
+      subject: '账号已完成注销 | {{siteTitle}}',
+      contentType: 'accountDeletionCompleted',
+      headerSubtitle: '账号注销',
+      variables: ['username', 'deletedAt']
+    },
+    'account.deletion.cancelled': {
+      name: '注销申请已撤销',
+      subject: '账号注销已撤销 | {{siteTitle}}',
+      contentType: 'accountDeletionCancelled',
+      headerSubtitle: '账号注销',
+      variables: ['username', 'reason', 'cancelledAt']
+    },
+    'account.login.alert': {
+      name: '登录提醒（新登录）',
+      subject: '账号登录提醒 | {{siteTitle}}',
+      contentType: 'accountLoginAlert',
+      headerSubtitle: '安全提醒',
+      variables: ['username', 'time', 'ip', 'device']
+    },
+    'account.login.failed': {
+      name: '登录失败提醒（密码错误）',
+      subject: '账号登录失败提醒 | {{siteTitle}}',
+      contentType: 'accountLoginFailed',
+      headerSubtitle: '安全提醒',
+      variables: ['username', 'time', 'ip', 'failCount']
+    },
+    'account.password.changed': {
+      name: '密码修改成功',
+      subject: '密码修改成功 | {{siteTitle}}',
+      contentType: 'passwordChanged',
+      headerSubtitle: '安全提醒',
+      variables: ['username', 'time', 'ip']
+    },
+    'account.password.reset': {
+      name: '密码重置成功',
+      subject: '密码重置成功 | {{siteTitle}}',
+      contentType: 'passwordReset',
+      headerSubtitle: '安全提醒',
+      variables: ['username', 'time', 'ip']
+    },
+    'account.email.bound': {
+      name: '邮箱绑定成功',
+      subject: '邮箱绑定成功 | {{siteTitle}}',
+      contentType: 'emailBound',
+      headerSubtitle: '安全提醒',
+      variables: ['username', 'email', 'time']
+    },
+    'account.email.unbound': {
+      name: '邮箱解绑通知',
+      subject: '邮箱已解绑 | {{siteTitle}}',
+      contentType: 'emailUnbound',
+      headerSubtitle: '安全提醒',
+      variables: ['username', 'oldEmail', 'time']
+    },
+    'account.2fa.enabled': {
+      name: '两步验证已开启',
+      subject: '两步验证已开启 | {{siteTitle}}',
+      contentType: 'twoFactorEnabled',
+      headerSubtitle: '安全提醒',
+      variables: ['username', 'time']
+    },
+    'account.2fa.disabled': {
+      name: '两步验证已关闭',
+      subject: '两步验证已关闭 | {{siteTitle}}',
+      contentType: 'twoFactorDisabled',
+      headerSubtitle: '安全提醒',
+      variables: ['username', 'time']
+    },
+    'account.password.adminReset': {
+      name: '密码被管理员重置',
+      subject: '账号密码已被重置 | {{siteTitle}}',
+      contentType: 'passwordAdminReset',
+      headerSubtitle: '安全提醒',
+      variables: ['username', 'time']
     }
   }
 
@@ -318,7 +507,7 @@ export class SmtpService {
       // 验证SMTP连接
       await this.transporter.verify()
       return true
-    } catch (error) {
+    } catch (error: any) {
       console.error('初始化SMTP配置失败:', error instanceof Error ? error.message : '未知错误')
       this.smtpConfig = null
       this.transporter = null
@@ -366,11 +555,18 @@ export class SmtpService {
       text: textContent || finalHtml.replace(/<[^>]*>/g, '') // 简单的HTML转文本
     }
 
+    this.lastSendFailure = null
     try {
       const result = await this.transporter!.sendMail(mailOptions)
       console.log(`邮件发送成功: ${result.messageId}`)
       return true
     } catch (error: any) {
+      // 记下原始错误，供调用方判断"收件人不存在"这类永久失败（会直接提示学生邮箱写错了）
+      this.lastSendFailure = {
+        responseCode: Number(error?.responseCode || 0) || undefined,
+        code: error?.code,
+        message: error?.response || error?.message
+      }
       // 自动重试机制：如果是因为发件人地址不匹配导致的553/501错误，尝试使用认证用户作为发件人
       if (
         (error.responseCode === 553 || error.responseCode === 501) &&
@@ -391,7 +587,7 @@ export class SmtpService {
           const result = await this.transporter!.sendMail(retryMailOptions)
           console.log(`重试发送成功: ${result.messageId}`)
           return true
-        } catch (retryError) {
+        } catch (retryError: any) {
           console.error('重试发送失败:', retryError)
           throw error // 如果重试也失败，抛出原始错误
         }
@@ -400,6 +596,13 @@ export class SmtpService {
       console.error('发送邮件失败:', error)
       throw error
     }
+  }
+
+  /** 最近一次发信失败的原始信息（成功后被清空） */
+  private lastSendFailure: { responseCode?: number; code?: string; message?: string } | null = null
+
+  getLastSendFailure() {
+    return this.lastSendFailure
   }
 
   /**
@@ -424,7 +627,7 @@ export class SmtpService {
         subject = custom.subject
         html = custom.html
       }
-    } catch (e) {
+    } catch (e: any) {
       // 忽略读取失败，走内置
     }
 
@@ -494,7 +697,7 @@ export class SmtpService {
         return await this.sendMail(to, fallbackSubject, fallbackHtml, undefined, ipAddress)
       }
       return await this.sendMail(to, subject, html, undefined, ipAddress)
-    } catch (error) {
+    } catch (error: any) {
       console.error('渲染并发送邮件失败:', error)
       return false
     }
@@ -510,7 +713,7 @@ export class SmtpService {
         if (!initialized) {
           return { success: false, message: 'SMTP配置无效或未启用' }
         }
-      } catch (error) {
+      } catch (error: any) {
         return {
           success: false,
           message: '初始化SMTP配置失败',
@@ -522,7 +725,7 @@ export class SmtpService {
     try {
       await this.transporter!.verify()
       return { success: true, message: 'SMTP连接测试成功' }
-    } catch (error) {
+    } catch (error: any) {
       return {
         success: false,
         message: 'SMTP连接测试失败',
@@ -555,7 +758,7 @@ export class SmtpService {
         success,
         message: success ? '测试邮件发送成功' : '测试邮件发送失败'
       }
-    } catch (error) {
+    } catch (error: any) {
       return {
         success: false,
         message: '测试邮件发送失败',
@@ -744,7 +947,7 @@ export async function sendEmailNotificationToUser(
       },
       ipAddress
     )
-  } catch (error) {
+  } catch (error: any) {
     console.error('发送邮件通知失败:', error)
     return false
   }

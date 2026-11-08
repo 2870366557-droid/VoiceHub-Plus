@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 
 import { execSync } from 'child_process'
 import fs from 'fs'
@@ -242,6 +244,9 @@ async function checkSchemaConsistency(sql) {
     'api_keys',
     'api_key_permissions',
     'api_logs',
+    'AstrbotBinding',
+    'AstrbotOutbox',
+    'AstrbotBindingCode',
     'BackupHistory',
     'CardCode',
     'CardCodeRedeemLog',
@@ -338,8 +343,11 @@ async function checkSchemaConsistency(sql) {
       'captchaEnabled',
       'captchaMaxFailures',
       'autoBackupEnabled',
-      'autoBackupConfig'
+      'autoBackupConfig',
+      'astrbotEnabled',
+      'astrbotPlatforms'
     ],
+    AstrbotOutbox: ['targetOwners', 'claimToken'],
     PasswordAuditLog: [
       'userId',
       'actorId',

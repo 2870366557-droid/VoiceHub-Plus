@@ -1,3 +1,6 @@
+<!--
+Modified by YH-Chen on 2026-10-17
+-->
 <template>
   <div class="home">
     <Transition name="home-boot-loader">
@@ -101,7 +104,7 @@
               <div v-if="isClientAuthenticated" class="user-info">
                 <div class="user-details-desktop">
                   <span class="user-name">{{ user?.name || locale.userFallback }}</span>
-                  <span v-if="isAdmin" class="user-badge admin">{{ roleName }}</span>
+                  <span v-if="canAccessAdmin" class="user-badge admin">{{ roleName }}</span>
                   <span v-else class="user-badge">{{ userClassInfo }}</span>
                 </div>
 
@@ -123,7 +126,7 @@
                       <Icon name="user" :size="16" />
                       <span>{{ locale.account }}</span>
                     </NuxtLink>
-                    <NuxtLink v-if="isAdmin" class="action-item" to="/dashboard">
+                    <NuxtLink v-if="canAccessAdmin" class="action-item" to="/dashboard">
                       <Icon name="settings" :size="16" />
                       <span>{{ locale.dashboard }}</span>
                     </NuxtLink>
@@ -154,6 +157,11 @@
         </div>
       </div>
 
+      <!-- 顶部公告栏：大标题/副标题之下、歌单（标签页）之上 -->
+      <ClientOnly>
+        <AnnouncementBar />
+      </ClientOnly>
+
       <!-- 中间主体内容区域 -->
       <div class="content-area">
         <!-- 选项卡区域-->
@@ -182,6 +190,23 @@
             <Icon class="tab-icon" name="search" :size="20" />
             <span class="tab-text">{{ locale.tabs.request }}</span>
           </div>
+          <ClientOnly>
+            <div
+              :class="{ active: activeTab === 'community', disabled: !isClientAuthenticated }"
+              class="section-tab"
+              data-tab="community"
+              @click="isClientAuthenticated ? handleTabClick('community') : showLoginNotice()"
+            >
+              <Icon class="tab-icon" name="users" :size="20" />
+              <span class="tab-text">{{ communityLocale.tab }}</span>
+            </div>
+            <template #fallback>
+              <div class="section-tab disabled" data-tab="community">
+                <Icon class="tab-icon" name="users" :size="20" />
+                <span class="tab-text">{{ communityLocale.tab }}</span>
+              </div>
+            </template>
+          </ClientOnly>
           <ClientOnly>
             <div
               ref="notificationTabRef"
@@ -215,14 +240,17 @@
         </div>
 
         <!-- 内容区域 -->
-        <div class="tab-content-container">
+        <div
+          class="tab-content-container"
+          :class="{ 'tab-content-container--scroll': activeTab === 'community' }"
+        >
           <ClientOnly>
             <!-- 播出排期内容 -->
             <div v-if="activeTab === 'schedule'" key="schedule" class="tab-pane schedule-tab-pane">
               <div class="full-width">
                 <SongsScheduleList
                   :error="error"
-                  :loading="loading"
+                  :loading="scheduleLoading"
                   :schedules="publicSchedules"
                   @semester-change="handleSemesterChange"
                 />
@@ -254,6 +282,21 @@
                 @request="handleRequest"
                 @vote="handleVote"
               />
+            </div>
+
+            <!-- 回声社区内容 -->
+            <div v-else-if="activeTab === 'community'" key="community" class="tab-pane community-pane">
+              <div v-if="!isClientAuthenticated" class="login-required-container">
+                <div class="login-required-content">
+                  <div class="login-icon">💬</div>
+                  <h3>{{ communityLocale.loginRequired }}</h3>
+                  <p>{{ communityLocale.loginRequiredDesc }}</p>
+                  <button class="login-button" @click="navigateToLogin">
+                    {{ communityLocale.loginNow }}
+                  </button>
+                </div>
+              </div>
+              <CommunityFeed v-else />
             </div>
 
             <!-- 通知内容 -->
@@ -456,6 +499,61 @@
                               color="var(--color-collab)"
                               name="message-circle"
                             />
+                            <Icon
+                              v-else-if="
+                                notification.type === 'COMMUNITY_COMMENT' ||
+                                notification.type === 'COMMUNITY_POST_APPROVED'
+                              "
+                              :size="20"
+                              color="var(--color-accent)"
+                              name="message-circle"
+                            />
+                            <Icon
+                              v-else-if="notification.type === 'COMMUNITY_POST_LIKE'"
+                              :size="20"
+                              color="var(--color-error)"
+                              name="heart"
+                            />
+                            <Icon
+                              v-else-if="
+                                notification.type === 'COMMUNITY_COMMENT_REPLY' ||
+                                notification.type === 'COMMUNITY_MENTION'
+                              "
+                              :size="20"
+                              color="var(--color-accent)"
+                              name="message-circle"
+                            />
+                            <Icon
+                              v-else-if="
+                                notification.type === 'COMMUNITY_REPORT_AUTO_HIDE' ||
+                                notification.type === 'COMMUNITY_REPORT_HANDLED' ||
+                                notification.type === 'COMMUNITY_APPEAL_HANDLED'
+                              "
+                              :size="20"
+                              color="var(--color-warning, var(--color-error))"
+                              name="x-circle"
+                            />
+                            <Icon
+                              v-else-if="
+                                notification.type === 'COMMUNITY_POST_REJECTED' ||
+                                notification.type === 'COMMUNITY_POST_REMOVED'
+                              "
+                              :size="20"
+                              color="var(--color-error)"
+                              name="x-circle"
+                            />
+                            <Icon
+                              v-else-if="notification.type === 'COMMUNITY_MUTED'"
+                              :size="20"
+                              color="var(--color-warning)"
+                              name="warning"
+                            />
+                            <Icon
+                              v-else-if="notification.type === 'COMMUNITY_UNMUTED'"
+                              :size="20"
+                              color="var(--color-success)"
+                              name="check"
+                            />
                             <Icon v-else :size="20" color="var(--text-muted)" name="bell" />
                           </div>
                           <div class="notification-title-row">
@@ -494,6 +592,9 @@
                                 <span v-else-if="notification.type === 'COLLABORATION_RESPONSE'"
                                   >{{ locale.notificationTypes.COLLABORATION_RESPONSE }}</span
                                 >
+                                <span
+                                  v-else-if="locale.notificationTypes[notification.type]"
+                                >{{ locale.notificationTypes[notification.type] }}</span>
                                 <span v-else>{{ locale.notificationTypes.SYSTEM }}</span>
                                 <span v-if="!notification.read" class="unread-indicator" />
                               </div>
@@ -845,12 +946,13 @@ import ConfirmDialog from '~/components/UI/ConfirmDialog.vue'
 import AppLoadingScreen from '~/components/UI/AppLoadingScreen.vue'
 
 import { useNotifications } from '~/composables/useNotifications'
-import { useSiteConfig } from '~/composables/useSiteConfig'
+import { useSiteConfig, setSiteConfigData } from '~/composables/useSiteConfig'
 import { useToast } from '~/composables/useToast'
 import { renderMarkdown } from '~/utils/markdown'
 import CustomSelect from '~/components/UI/Common/CustomSelect.vue'
 import { useLocale } from '~/utils/locale'
-import { useTheme } from '~/composables/useTheme'
+import { applyThemeConfig, useTheme } from '~/composables/useTheme'
+import { useHomeBootstrap } from '~/composables/useHomeBootstrap'
 import { useThemeImage } from '~/composables/useThemeImage'
 import { useScrollMemory } from '~/composables/useScrollMemory'
 
@@ -858,8 +960,16 @@ import { useScrollMemory } from '~/composables/useScrollMemory'
 const config = useRuntimeConfig()
 const router = useRouter()
 const route = useRoute()
-const { pages, common, currentLocale, setLocale, supportedLocales, isFollowingSystem, followSystemLocale } =
-  useLocale()
+const {
+  pages,
+  common,
+  community: communityLocale,
+  currentLocale,
+  setLocale,
+  supportedLocales,
+  isFollowingSystem,
+  followSystemLocale
+} = useLocale()
 const locale = computed(() => pages.value?.home || {})
 const getHomeText = (section, key, ...args) => formatLocaleValue(locale.value?.[section]?.[key], ...args)
 const getMessage = (key, ...args) => getHomeText('messages', key, ...args)
@@ -871,18 +981,19 @@ const {
   description: siteDescription,
   guidelines: submissionGuidelines,
   icp: icpNumber,
-  schoolLogoHomeDisplayUrl,
-  initSiteConfig
+  schoolLogoHomeDisplayUrl
 } = useSiteConfig()
 
 // 将投稿须知 Markdown 渲染为安全 HTML
 const renderedGuidelines = computed(() => renderMarkdown(submissionGuidelines.value))
 
 const auth = useAuth()
+const permissions = usePermissions()
 const { showToast } = useToast()
 const { getLogo } = useThemeImage()
 const isClientAuthenticated = computed(() => auth?.isAuthenticated?.value || false)
 const isAdmin = computed(() => auth?.isAdmin?.value || false)
+const canAccessAdmin = computed(() => permissions.canAccessAdmin.value || false)
 const user = computed(() => auth?.user?.value || null)
 
 const roleName = computed(() => {
@@ -898,6 +1009,10 @@ const userClassInfo = computed(() => {
 })
 
 const songs = useSongs()
+
+// 首页首屏数据 SSR 预取（站点配置/登录态/公共排期/歌曲总数），客户端仅后台刷新
+const { data: homeData, pending: homeDataPending, refresh: refreshHomeData } = useHomeBootstrap()
+const ssrPrimed = ref(false)
 // 立即初始化通知服务，避免时序问题
 const notificationsService = useNotifications()
 const unreadNotificationCount = ref(0)
@@ -926,8 +1041,8 @@ const BOOT_PROGRESS = {
   FINALIZING: 88,
   COMPLETE: 100
 }
-const MIN_BOOT_TIME_MS = 720
-const BOOT_EXIT_DELAY_MS = 180
+const MIN_BOOT_TIME_MS = 300
+const BOOT_EXIT_DELAY_MS = 120
 const BOOT_SLOW_THRESHOLD_MS = 8000
 const showBootLoading = ref(true)
 const bootProgress = ref(BOOT_PROGRESS.INITIAL)
@@ -1069,7 +1184,7 @@ const activeTab = ref('schedule') // 默认显示播出排期
 // 各标签页滚动位置独立记忆与恢复
 useScrollMemory(() => activeTab.value)
 
-const tabOrder = ['schedule', 'songs', 'request', 'notification']
+const tabOrder = ['schedule', 'songs', 'request', 'community', 'notification']
 const activeIndex = computed(() => {
   const index = tabOrder.indexOf(activeTab.value)
   return index === -1 ? 0 : index
@@ -1458,6 +1573,68 @@ const updateSongCounts = async (semester = null) => {
   }
 }
 
+// 智能刷新定时器：依据通知设置的刷新间隔周期性静默刷新
+const setupRefreshInterval = () => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+  }
+
+  const intervalSeconds = notificationSettings.value.refreshInterval || 60
+  const intervalMs = intervalSeconds * 1000
+
+  console.log(`设置智能刷新间隔: ${intervalSeconds}秒`)
+
+  refreshInterval = setInterval(async () => {
+    try {
+      if (isClientAuthenticated.value) {
+        await Promise.allSettled([songs.fetchSongs(true), songs.fetchPublicSchedules(true), loadNotifications()])
+      } else {
+        await Promise.allSettled([songs.fetchPublicSchedules(true), songs.fetchSongCount()])
+      }
+
+      await updateSongCounts()
+    } catch (error) {
+      console.error('定时刷新失败:', error)
+    }
+  }, intervalMs)
+}
+
+// 将 SSR 预取数据灌入各组合式状态；配置缺失视为预取失败，交由客户端回退补拉
+const homeDataApplied = ref(false)
+const applyHomeData = () => {
+  const d = homeData.value
+  if (!d || !d.config || homeDataApplied.value) return
+  homeDataApplied.value = true
+
+  setSiteConfigData(d.config)
+  if (import.meta.client) {
+    try {
+      applyThemeConfig(
+        d.config.defaultTheme,
+        typeof d.config.enabledThemes === 'string' ? JSON.parse(d.config.enabledThemes) : d.config.enabledThemes
+      )
+    } catch {
+      applyThemeConfig('System', null)
+    }
+  }
+
+  if (d.user) {
+    auth.setAuthState(d.user)
+  }
+
+  const schedules = Array.isArray(d.schedules) ? d.schedules : []
+  songs.publicSchedules.value = schedules
+  songs.publicSongs.value = songs.extractSongsFromSchedules(schedules)
+  songs.songCount.value = d.count || 0
+  if (isClientAuthenticated.value) {
+    hasInitializedAuthData.value = true
+  }
+  updateSongCounts()
+  ssrPrimed.value = true
+}
+
+watch(homeData, applyHomeData, { immediate: true })
+
 // 首页标题：根据加载阶段动态切换
 // 配置加载完成前使用环境配置的站点标题兜底，保证 SSR 输出真实站点名（SEO / 链接预览），
 // 并与 og:title 保持一致；加载完成后切换为数据库配置的站点标题
@@ -1479,7 +1656,7 @@ if (import.meta.client) {
   hasShownBootLoading.value = true
 }
 
-// 在组件挂载后初始化认证和歌曲（只会在客户端执行）
+// 在组件挂载后完成首屏与后台数据加载（只会在客户端执行）
 onMounted(async () => {
   const bootStartedAt = Date.now()
 
@@ -1487,6 +1664,48 @@ onMounted(async () => {
   const tabFromQuery = Array.isArray(queryTab) ? queryTab[0] : queryTab
   if (tabFromQuery && tabOrder.includes(tabFromQuery)) {
     activeTab.value = tabFromQuery
+  }
+
+  // 遮罩淡出：SSR 快开不做人工停留，直接靠淡出收场；否则首访走最短停留，非首访直接放行
+  const dismissOverlay = async () => {
+    if (bootSlowTimer) {
+      clearTimeout(bootSlowTimer)
+      bootSlowTimer = null
+    }
+
+    // SSR 已灌入首屏数据：内容即时可见，仅保留一次淡出过渡，不再硬等最短时间
+    if (ssrPrimed.value) {
+      setBootState({ progress: BOOT_PROGRESS.COMPLETE, message: locale.value.bootMessages.COMPLETE })
+      showBootLoading.value = false
+      return
+    }
+
+    if (isFirstVisit) {
+      await finishBootLoading(bootStartedAt)
+    } else {
+      showBootLoading.value = false
+    }
+  }
+
+  // 次要数据：个人歌曲、通知、通知设置、定时刷新，均在首屏淡出后后台执行
+  const loadSecondaryData = () => {
+    if (isClientAuthenticated.value) {
+      songs.fetchSongs(true).then(() => updateSongCounts())
+      loadNotifications()
+      fetchNotificationSettings()
+        .then(() => setupRefreshInterval())
+        .catch(() => setupRefreshInterval())
+    } else {
+      setupRefreshInterval()
+    }
+
+    if (songs.notification) {
+      watch(songs.notification, (newVal) => {
+        if (newVal.show) {
+          showNotification(newVal.message, newVal.type)
+        }
+      })
+    }
   }
 
   try {
@@ -1504,87 +1723,33 @@ onMounted(async () => {
       await waitForFirstPaint()
     }
 
-    setBootState({ progress: BOOT_PROGRESS.CONFIG, message: locale.value.bootMessages.CONFIG })
-    await initSiteConfig()
-
-    setBootState({ progress: BOOT_PROGRESS.AUTH, message: locale.value.bootMessages.AUTH })
-    const currentUser = await auth.initAuth()
-
-    setBootState({ progress: BOOT_PROGRESS.CONTENT, message: locale.value.bootMessages.CONTENT })
-    if (isClientAuthenticated.value) {
-      hasInitializedAuthData.value = true
-      // 歌曲列表后台预取，避免阻塞首页首屏
-      songs.fetchSongs(true).then(() => updateSongCounts())
-      await Promise.allSettled([
-        songs.fetchSongCount(),
-        songs.fetchPublicSchedules(),
-        loadNotifications(),
-        fetchNotificationSettings()
-      ])
-      await checkPasswordChangeRequired(currentUser)
-    } else {
-      hasInitializedAuthData.value = false
-      await Promise.allSettled([songs.fetchSongCount(), songs.fetchPublicSchedules()])
+    // 首屏数据：SSR 命中则直接使用；纯客户端导航等待初始请求完成；SSR 失败则并行补拉
+    if (!ssrPrimed.value) {
+      setBootState({ progress: BOOT_PROGRESS.CONTENT, message: locale.value.bootMessages.CONTENT })
+      if (homeDataPending.value) {
+        await until(homeDataPending).toBe(false)
+        applyHomeData()
+      }
+      if (!ssrPrimed.value) {
+        await refreshHomeData()
+        applyHomeData()
+      }
     }
 
     setBootState({ progress: BOOT_PROGRESS.FINALIZING, message: locale.value.bootMessages.FINALIZING })
     await updateSongCounts()
-
-    const setupRefreshInterval = () => {
-      if (refreshInterval) {
-        clearInterval(refreshInterval)
-      }
-
-      const intervalSeconds = notificationSettings.value.refreshInterval || 60
-      const intervalMs = intervalSeconds * 1000
-
-      console.log(`设置智能刷新间隔: ${intervalSeconds}秒`)
-
-      refreshInterval = setInterval(async () => {
-        try {
-          if (isClientAuthenticated.value) {
-            await Promise.allSettled([
-              songs.fetchSongs(true),
-              songs.fetchPublicSchedules(true),
-              loadNotifications()
-            ])
-          } else {
-            await Promise.allSettled([songs.fetchPublicSchedules(true), songs.fetchSongCount()])
-          }
-
-          await updateSongCounts()
-        } catch (error) {
-          console.error('??????:', error)
-        }
-      }, intervalMs)
-    }
-
-    setupRefreshInterval()
-
-    if (songs.notification) {
-      watch(songs.notification, (newVal) => {
-        if (newVal.show) {
-          showNotification(newVal.message, newVal.type)
-        }
-      })
-    }
   } catch (error) {
-    console.error('???????', error)
+    console.error('首页首屏数据加载失败:', error)
     if (isFirstVisit) {
       setBootState({ progress: BOOT_PROGRESS.FALLBACK, message: locale.value.bootMessages.FALLBACK })
     }
-    await Promise.allSettled([songs.fetchPublicSchedules(), songs.fetchSongCount()])
-    await updateSongCounts()
   } finally {
-    if (isFirstVisit) {
-      if (bootSlowTimer) {
-        clearTimeout(bootSlowTimer)
-        bootSlowTimer = null
-      }
-
-      await finishBootLoading(bootStartedAt)
-    }
+    await dismissOverlay()
   }
+
+  // 遮罩淡出后再拉取次要数据，避免拖慢首屏
+  checkPasswordChangeRequired(auth.user.value)
+  loadSecondaryData()
 })
 
 // 组件卸载时清除定时器
@@ -1618,6 +1783,12 @@ const filteredSongs = computed(() => {
 })
 const loading = computed(() => songs?.loading?.value || false)
 const error = computed(() => songs?.error?.value || '')
+// 排期列表加载态：客户端回首页时 useHomeBootstrap 正在拉取且尚无排期，先展示骨架屏而非空状态
+const scheduleLoading = computed(
+  () =>
+    loading.value ||
+    (publicSchedules.value.length === 0 && (homeDataPending.value || !homeDataApplied.value))
+)
 
 // 处理投稿请求
 const handleRequest = async (songData) => {
@@ -1682,10 +1853,10 @@ const handleVote = async (song) => {
     // 检查是否是取消投票请求
     if (song.unvote) {
       // 传递完整对象以支持撤销投票功能
-      await songs.voteSong(song)
+      await songs.voteSong(song, { revealToRequester: song?.revealToRequester === true })
     } else {
       // 保持向后兼容，传递ID
-      await songs.voteSong(song.id)
+      await songs.voteSong(song.id, { revealToRequester: song?.revealToRequester === true })
     }
 
     // 静默刷新歌曲列表以获取最新状态，但不影响当前视图
@@ -1947,8 +2118,8 @@ if (
 <style scoped>
 .home-boot-loader-leave-active {
   transition:
-    opacity 420ms ease,
-    filter 420ms ease;
+    opacity 240ms ease,
+    filter 240ms ease;
 }
 
 .home-boot-loader-leave-to {
@@ -2635,6 +2806,25 @@ if (
   width: 100%;
   box-sizing: border-box;
   animation: tab-pane-enter 0.45s ease;
+}
+
+.community-pane {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 社区页内容较长，交给页面自然滚动，避免内层滚动容器吞掉鼠标滚轮 */
+.tab-content-container--scroll {
+  overflow: visible;
+  min-height: 0;
+}
+
+.tab-content-container--scroll .community-pane,
+.tab-content-container--scroll .community-shell {
+  height: auto;
+  min-height: 0;
 }
 
 /* 针对排期标签页的特殊样式 */

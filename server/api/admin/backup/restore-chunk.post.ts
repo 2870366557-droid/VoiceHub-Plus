@@ -29,6 +29,7 @@ import {
 import { and, eq, sql } from 'drizzle-orm'
 import { restoreScheduleSongPoolRecord } from '~~/server/utils/restoreScheduleSongPool'
 import { omitMaskedSystemSettingsSecrets } from '~~/server/api/admin/system-settings/secretMask'
+import { restoreAstrbotBindings } from '~~/server/utils/astrbot-backup'
 import { createApiError } from '~~/server/utils/apiError'
 import { validateThemeConfig } from '~~/server/utils/theme-config'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
@@ -84,7 +85,7 @@ export default defineEventHandler(async (event) => {
     Object.entries(mappings?.apiKeys || {}).map(([k, v]) => [String(k), String(v)])
   )
   const preservedSuperAdminIds = new Set(
-    (mappings?.meta?.preservedSuperAdminIds || []).map((id) => Number(id))
+    (mappings?.meta?.preservedSuperAdminIds || []).map((id: any) => Number(id))
   )
   const temporaryPreservedUserId = mappings?.meta?.temporaryPreservedUserId
     ? Number(mappings.meta.temporaryPreservedUserId)
@@ -95,14 +96,25 @@ export default defineEventHandler(async (event) => {
     Number.isInteger(reservedUserIdRaw) && reservedUserIdRaw > 0 ? reservedUserIdRaw : null
   const shouldOverwriteSuperAdmin = overwriteSuperAdmin && hasSuperAdminInBackup
 
-  const newMappings = {
+  const newMappings: {
+    users: Record<string, any>
+    songs: Record<string, any>
+    cardCodes: Record<string, any>
+    apiKeys: Record<string, any>
+  } = {
     users: {},
     songs: {},
     cardCodes: {},
     apiKeys: {}
   }
 
-  const stats = {
+  const stats: {
+    processed: number
+    created: number
+    updated: number
+    errors: number
+    warnings: string[]
+  } = {
     processed: 0,
     created: 0,
     updated: 0,
@@ -156,7 +168,16 @@ export default defineEventHandler(async (event) => {
               userFields.forEach((field) => {
                 if (record.hasOwnProperty(field)) {
                   if (field === 'role') {
-                    if (!['USER', 'SONG_ADMIN', 'ADMIN', 'SUPER_ADMIN'].includes(record[field])) {
+                    if (
+                      ![
+                        'USER',
+                        'BROADCASTER',
+                        'REVIEWER',
+                        'SONG_ADMIN',
+                        'ADMIN',
+                        'SUPER_ADMIN'
+                      ].includes(record[field])
+                    ) {
                       userData[field] = 'USER'
                     } else {
                       userData[field] = record[field]
@@ -182,7 +203,7 @@ export default defineEventHandler(async (event) => {
               return userData
             }
 
-            let createdUser
+            let createdUser: any
             if (mode === 'merge') {
               const existingUser = await tx.query.users.findFirst({
                 where: eq(users.username, record.username)
@@ -218,7 +239,7 @@ export default defineEventHandler(async (event) => {
                         .returning()
                     )[0]
                   }
-                } catch (error) {
+                } catch (error: any) {
                   console.warn(`用户 ${record.username} 使用原始ID创建失败，使用自动生成ID`)
                   createdUser = (await tx.insert(users).values(buildUserData(true)).returning())[0]
                 }
@@ -293,6 +314,7 @@ export default defineEventHandler(async (event) => {
               }
             }
 
+            await restoreAstrbotBindings(tx, createdUser.id, record)
             if (record.id && createdUser.id) {
               newMappings.users[record.id] = createdUser.id
             }
@@ -586,7 +608,7 @@ export default defineEventHandler(async (event) => {
             if (record.updatedAt) songData.updatedAt = new Date(record.updatedAt)
             else songData.updatedAt = new Date()
 
-            let createdSong
+            let createdSong: any
             if (mode === 'merge') {
               const existingSong = await tx.query.songs.findFirst({
                 where: and(eq(songs.title, record.title), eq(songs.artist, record.artist))
@@ -620,7 +642,7 @@ export default defineEventHandler(async (event) => {
                         .returning()
                     )[0]
                   }
-                } catch (error) {
+                } catch (error: any) {
                   createdSong = (await tx.insert(songs).values(songData).returning())[0]
                 }
                 stats.created++
@@ -848,16 +870,22 @@ export default defineEventHandler(async (event) => {
               'submissionGuidelines',
               'icpNumber',
               'gonganNumber',
+              'showBeianIcon',
               'enableSubmissionLimit',
               'dailySubmissionLimit',
               'weeklySubmissionLimit',
               'monthlySubmissionLimit',
+              'enableGlobalSubmissionLimit',
+              'globalDailySubmissionLimit',
+              'globalWeeklySubmissionLimit',
+              'globalMonthlySubmissionLimit',
               'scheduleDaysBeforeEnabled',
               'scheduleDaysBefore',
               'scheduleDaysAfterEnabled',
               'scheduleDaysAfter',
               'showBlacklistKeywords',
               'hideStudentInfo',
+              'allowAnonymousSubmission',
               'enableReplayRequests',
               'enableCollaborativeSubmission',
               'enableSubmissionRemarks',
@@ -879,6 +907,16 @@ export default defineEventHandler(async (event) => {
               'smtpPassword',
               'smtpFromEmail',
               'smtpFromName',
+              'astrbotEnabled',
+              'astrbotPlatforms',
+              'astrbotBaseUrl',
+              'astrbotToken',
+              'astrbotBroadcastEnabled',
+              'astrbotGroupTargets',
+              'astrbotGroupEvents',
+              'astrbotGroupThrottle',
+              'astrbotPushMode',
+              'astrbotWeeklyConfig',
               'allowOAuthRegistration',
               'allowRegister',
               'registerRequiresApproval',
@@ -1851,7 +1889,7 @@ export default defineEventHandler(async (event) => {
         }
       })
       stats.processed++
-    } catch (error) {
+    } catch (error: any) {
       console.error(`处理记录失败 (${tableName}):`, error)
       stats.errors++
       stats.warnings.push(`记录处理失败: ${error.message}`)
@@ -1873,7 +1911,7 @@ export default defineEventHandler(async (event) => {
           .where(eq(systemSettings.id, restoredSettings[0].id))
         stats.warnings.push('SMTP 未配置，已剥离 registerEmailRequired，避免注册邮箱流程不可用')
       }
-    } catch (settingsError) {
+    } catch (settingsError: any) {
       console.error('恢复后设置一致性校验失败:', settingsError)
     }
   }
@@ -1881,7 +1919,7 @@ export default defineEventHandler(async (event) => {
   // 恢复可能携带显式 id，完成后同步所有自增序列，避免后续插入主键冲突
   try {
     await syncAllSequences()
-  } catch (seqError) {
+  } catch (seqError: any) {
     const seqErrorMsg = seqError instanceof Error ? seqError.message : '未知错误'
     stats.warnings.push(`自增序列同步失败: ${seqErrorMsg}`)
     console.error('自增序列同步失败:', seqError)

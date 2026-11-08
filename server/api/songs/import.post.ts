@@ -1,12 +1,19 @@
 import { defineEventHandler, createError, readBody } from 'h3'
 import { db } from '~/drizzle/db'
 import { songs, semesters, songBlacklists } from '~/drizzle/schema'
-import { eq, inArray, and, asc } from 'drizzle-orm'
+import { eq, inArray, and, asc, sql } from 'drizzle-orm'
 import { createApiError } from '~~/server/utils/apiError'
 import { getServerDate } from '~~/server/utils/serverTime'
 import { backfillMissingSongDurations } from '~~/server/services/durationValidationService'
 import { normalizeStoredDuration } from '~~/server/utils/song-duration-policy'
 import { matchBlacklistGenre, matchBlacklistLanguage, resolveSongTypes } from '~~/server/utils/song-type-resolver'
+import {
+  findExceededGlobalSubmissionLimit,
+  getActiveGlobalSubmissionLimits,
+  type LimitType
+} from '~~/server/utils/submissionLimit'
+import { getSystemSettingsCached } from '~~/server/utils/system-settings-helper'
+import { SERVER_ERROR_CODES } from '~~/server/config/constants'
 
 export default defineEventHandler(async (event) => {
   const user = event.context.user
@@ -90,51 +97,15 @@ export default defineEventHandler(async (event) => {
       continue
     }
 
-    // 2. 检查黑名单
-    const songFullName = `${song.title} - ${song.artist || ''}`.toLowerCase()
-    let isBlocked = false
-    let blockReason = ''
-
-    // 语种/曲风懒解析：首次遇到类型项才请求音源，已被歌名/关键词拦截的歌曲不触发外部请求
-    let songTypes: Awaited<ReturnType<typeof resolveSongTypes>> = null
-    let typesResolved = false
-
-    for (const item of blacklistItems) {
-      if (item.type === 'SONG') {
-        if (songFullName.includes(item.value.toLowerCase())) {
-          isBlocked = true
-          blockReason = item.reason || '黑名单歌曲'
-          break
-        }
-      } else if (item.type === 'KEYWORD') {
-        if (songFullName.includes(item.value.toLowerCase())) {
-          isBlocked = true
-          blockReason = item.reason || '包含违规关键词'
-          break
-        }
-      } else if (item.type === 'LANGUAGE') {
-        // 解析失败或平台不支持时返回 null，类型黑名单放行
-        if (!typesResolved) {
-          songTypes = await resolveSongTypes(song.musicPlatform, song.musicId)
-          typesResolved = true
-        }
-        if (songTypes && matchBlacklistLanguage(item.value, songTypes.languages)) {
-          isBlocked = true
-          blockReason = item.reason || `语种「${item.value}」已被加入黑名单`
-          break
-        }
-      } else if (item.type === 'GENRE') {
-        if (!typesResolved) {
-          songTypes = await resolveSongTypes(song.musicPlatform, song.musicId)
-          typesResolved = true
-        }
-        if (songTypes && matchBlacklistGenre(item.value, songTypes.genres)) {
-          isBlocked = true
-          blockReason = item.reason || `曲风「${item.value}」已被加入黑名单`
-          break
-        }
-      }
-    }
+    // 2. 检查黑名单（统一走 songBlacklistMatch，规则始终读后台配置）
+    const blacklistResult = await checkSongBlacklist({
+      title: song.title,
+      artist: song.artist,
+      musicPlatform: song.musicPlatform,
+      musicId: song.musicId ? String(song.musicId) : null
+    })
+    const isBlocked = blacklistResult.isBlocked
+    const blockReason = blacklistResult.reasons[0]?.reason || ''
 
     if (isBlocked) {
       results.failed++
@@ -167,15 +138,68 @@ export default defineEventHandler(async (event) => {
 
   // 批量插入
   if (songsToInsert.length > 0) {
-    const insertedSongs = await db
-      .insert(songs)
-      .values(songsToInsert)
-      .returning({
-        id: songs.id,
-        musicPlatform: songs.musicPlatform,
-        musicId: songs.musicId,
-        durationSeconds: songs.durationSeconds
+    const systemSettingsData = await getSystemSettingsCached()
+    const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'SONG_ADMIN'].includes(user.role)
+    const activeGlobalLimits = isAdmin
+      ? []
+      : getActiveGlobalSubmissionLimits(systemSettingsData)
+
+    type InsertedSongRow = {
+      id: number
+      musicPlatform: string | null
+      musicId: string | null
+      durationSeconds: number | null
+    }
+    let insertedSongs: InsertedSongRow[]
+
+    if (activeGlobalLimits.length > 0) {
+      // 往期导入同样写入 createdAt=now 的投稿行，会占用全站投稿总量。
+      // 与投稿主流程共用 global_submission_limit 咨询锁，在同一事务内按本批数量预留名额，
+      // 防止一次批量导入绕过全站限额
+      insertedSongs = await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('global_submission_limit'))`)
+
+        const exceededLimit = await findExceededGlobalSubmissionLimit(
+          tx as any,
+          systemSettingsData,
+          songsToInsert.length
+        )
+        if (exceededLimit) {
+          const codeMap: Record<LimitType, string> = {
+            daily: SERVER_ERROR_CODES.SONG_GLOBAL_DAILY_LIMIT_REACHED,
+            weekly: SERVER_ERROR_CODES.SONG_GLOBAL_WEEKLY_LIMIT_REACHED,
+            monthly: SERVER_ERROR_CODES.SONG_GLOBAL_MONTHLY_LIMIT_REACHED
+          }
+
+          throw createApiError(
+            403,
+            codeMap[exceededLimit.type],
+            `全站投稿总量已达上限（${exceededLimit.limit} 首）`,
+            { params: [exceededLimit.limit] }
+          )
+        }
+
+        return await tx
+          .insert(songs)
+          .values(songsToInsert)
+          .returning({
+            id: songs.id,
+            musicPlatform: songs.musicPlatform,
+            musicId: songs.musicId,
+            durationSeconds: songs.durationSeconds
+          })
       })
+    } else {
+      insertedSongs = await db
+        .insert(songs)
+        .values(songsToInsert)
+        .returning({
+          id: songs.id,
+          musicPlatform: songs.musicPlatform,
+          musicId: songs.musicId,
+          durationSeconds: songs.durationSeconds
+        })
+    }
 
     results.success = insertedSongs.length
 

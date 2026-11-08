@@ -1,3 +1,4 @@
+<!-- Modified by YH-Chen on 2026-10-17 -->
 <template>
   <div class="song-list">
     <div class="song-list-header">
@@ -293,7 +294,7 @@
                 <template v-if="song.cover && !failedCovers[song.cover]">
                   <img
                     :alt="song.title"
-                    :src="convertToHttps(song.cover)"
+                    :src="getCoverThumbUrl(song.cover)"
                     class="cover-image"
                     decoding="async"
                     loading="lazy"
@@ -353,6 +354,14 @@
                   >
                     {{ locale.cardCodeUsed }}
                   </span>
+                  <!-- 匿名投稿角标：仅投稿人本人可见（其他人看到的投稿人已是“匿名投稿”） -->
+                  <span
+                    v-if="isMySong(song) && song.submissionAnonymous === true"
+                    class="anonymous-tag"
+                    :title="locale.anonymousTagHint"
+                  >
+                    {{ locale.anonymousTag }}
+                  </span>
                   <button
                     v-if="song.hasSubmissionNote && song.submissionNote"
                     class="submission-note-trigger"
@@ -365,19 +374,21 @@
                 <div class="song-meta">
                   <span
                     :title="
-                      (song.collaborators && song.collaborators.length
-                        ? locale.mainRequesterTitle
-                        : locale.requesterTitle) +
-                      song.requester +
-                      (song.collaborators && song.collaborators.length
-                        ? '\n' + locale.collaboratorsTitle +
-                          song.collaborators.map((c) => c.displayName || c.name).join(', ')
-                        : '')
+                      song.isAnonymous
+                        ? locale.requesterTitle + locale.anonymousRequester
+                        : (song.collaborators && song.collaborators.length
+                            ? locale.mainRequesterTitle
+                            : locale.requesterTitle) +
+                          song.requester +
+                          (song.collaborators && song.collaborators.length
+                            ? '\n' + locale.collaboratorsTitle +
+                              song.collaborators.map((c) => c.displayName || c.name).join(', ')
+                            : '')
                     "
                     class="requester"
                   >
-                    {{ locale.requester }}{{ song.requester }}
-                    <span v-if="song.collaborators && song.collaborators.length > 0">
+                    {{ locale.requester }}{{ song.isAnonymous ? locale.anonymousRequester : song.requester }}
+                    <span v-if="!song.isAnonymous && song.collaborators && song.collaborators.length > 0">
                       & {{ song.collaborators.map((c) => c.displayName || c.name).join(' & ') }}
                     </span>
                   </span>
@@ -495,22 +506,78 @@
       </div>
     </Transition>
   </div>
+  <!-- 点赞署名选择：匿名 or 署名 + 是否记住该选择 -->
+  <Teleport to="body">
+    <Transition name="fade">
+      <div
+        v-if="pendingVoteSong"
+        class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+        @click.self="cancelReveal"
+      >
+        <div class="w-full max-w-sm rounded-2xl border border-border-secondary bg-bg-primary p-5 shadow-2xl">
+          <h3 class="text-sm font-black text-text-primary">{{ t.voteReveal.title }}</h3>
+          <p class="mt-1 text-[11px] text-text-tertiary">{{ t.voteReveal.desc }}</p>
+          <div class="mt-4 space-y-2">
+            <button
+              class="w-full rounded-xl border px-3 py-2.5 text-left transition-all"
+              :class="revealChoice === 'ANONYMOUS' ? 'border-primary bg-primary-10' : 'border-border-secondary hover:bg-bg-tertiary'"
+              type="button"
+              @click="revealChoice = 'ANONYMOUS'"
+            >
+              <p class="text-xs font-bold text-text-primary">{{ t.voteReveal.anonymous }}</p>
+              <p class="mt-0.5 text-[10px] text-text-tertiary">{{ t.voteReveal.anonymousHint }}</p>
+            </button>
+            <button
+              class="w-full rounded-xl border px-3 py-2.5 text-left transition-all"
+              :class="revealChoice === 'REVEAL' ? 'border-primary bg-primary-10' : 'border-border-secondary hover:bg-bg-tertiary'"
+              type="button"
+              @click="revealChoice = 'REVEAL'"
+            >
+              <p class="text-xs font-bold text-text-primary">{{ t.voteReveal.reveal }}</p>
+              <p class="mt-0.5 text-[10px] text-text-tertiary">{{ t.voteReveal.revealHint }}</p>
+            </button>
+          </div>
+          <label class="mt-3 flex items-start gap-2 rounded-xl bg-bg-secondary-60 px-3 py-2 text-[11px] text-text-secondary">
+            <input v-model="rememberChoice" class="mt-0.5 h-3.5 w-3.5 accent-[var(--primary)]" type="checkbox" />
+            <span class="min-w-0">
+              <span class="block font-bold">{{ t.voteReveal.remember }}</span>
+              <span class="mt-0.5 block text-text-tertiary">{{ t.voteReveal.rememberHint }}</span>
+            </span>
+          </label>
+          <div class="mt-4 flex gap-2">
+            <button
+              class="flex-1 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-white transition-all hover:bg-primary-hover"
+              type="button"
+              @click="confirmReveal"
+            >{{ t.voteReveal.confirm }}</button>
+            <button
+              class="rounded-xl border border-border-secondary px-4 py-2.5 text-xs font-bold text-text-secondary transition-all hover:bg-bg-tertiary"
+              type="button"
+              @click="cancelReveal"
+            >{{ t.voteReveal.cancel }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useAuth } from '~/composables/useAuth'
 import { useAudioPlayer } from '~/composables/useAudioPlayer'
+import { useSongPlayback } from '~/composables/useSongPlayback'
 import { useSemesters } from '~/composables/useSemesters'
 import { useSongs } from '~/composables/useSongs'
 import Icon from '~/components/UI/Icon.vue'
 import Pagination from '~/components/UI/Common/Pagination.vue'
 import MarqueeText from '~/components/UI/MarqueeText.vue'
 import ConfirmDialog from '~/components/UI/ConfirmDialog.vue'
-import { convertToHttps } from '~/utils/url'
+import { getCoverThumbUrl } from '~/utils/url'
 import { isBilibiliSong } from '~/utils/bilibiliSource'
 import { getMusicUrl as resolveMusicUrl } from '~/utils/musicUrl'
 import { useLocale } from '~/utils/locale'
+import { useNewUi } from '~/composables/useNewUi'
 import { useThemeImage } from '~/composables/useThemeImage'
 
 import dayjs from 'dayjs'
@@ -541,6 +608,9 @@ const emit = defineEmits(['vote', 'withdraw', 'cancelReplay', 'refresh', 'semest
 const voteInProgress = ref(false)
 const actionInProgress = ref(false)
 const { currentLocale, songs: songsLocale } = useLocale()
+// 点赞署名弹窗词条（修复：此前该定义被误嵌进 locale 的 computed 体内，
+// 导致 t 不在 setup 作用域、弹窗渲染时读 undefined 崩溃、无法点赞）
+const t = useNewUi()
 const locale = computed(() => {
   const base = songsLocale.value?.songList || {}
   const emptyText = () => ''
@@ -637,6 +707,7 @@ const handleSemesterFilterChange = (event) => {
 
 // 组件挂载和卸载时添加/移除窗口大小变化监听
 onMounted(async () => {
+  loadRevealMode()
   checkMobile()
   window.addEventListener('resize', checkMobile)
 
@@ -914,6 +985,54 @@ const getVoteButtonTitle = (song) => {
   return song.voted ? locale.value.unlike : locale.value.like
 }
 
+// 点赞时是否让投稿人知道是我点的（默认不公开，勾选后才署名）
+// 点赞署名偏好：ASK=每次询问（默认）/ ANONYMOUS=总是匿名 / REVEAL=总是署名
+const revealMode = ref('ASK')
+const pendingVoteSong = ref(null)
+const revealChoice = ref('ANONYMOUS')
+const rememberChoice = ref(false)
+
+const loadRevealMode = async () => {
+  if (!isAuthenticated.value) return
+  try {
+    const res = await $fetch('/api/user/vote-reveal')
+    const mode = res?.data?.voteRevealMode
+    if (mode === 'ANONYMOUS' || mode === 'REVEAL' || mode === 'ASK') revealMode.value = mode
+  } catch {
+    // 读取失败不阻塞点赞
+  }
+}
+
+const doVote = (song, reveal) => {
+  voteInProgress.value = true
+  try {
+    emit('vote', { ...song, unvote: !!song.voted, revealToRequester: reveal === true })
+  } finally {
+    voteInProgress.value = false
+  }
+}
+
+const cancelReveal = () => {
+  pendingVoteSong.value = null
+}
+
+const confirmReveal = async () => {
+  const song = pendingVoteSong.value
+  if (!song) return
+  const reveal = revealChoice.value === 'REVEAL'
+  pendingVoteSong.value = null
+  if (rememberChoice.value) {
+    try {
+      const nextMode = reveal ? 'REVEAL' : 'ANONYMOUS'
+      await $fetch('/api/user/vote-reveal', { method: 'PUT', body: { voteRevealMode: nextMode } })
+      revealMode.value = nextMode
+    } catch {
+      if (window.$showNotification) window.$showNotification(t.value.voteReveal.saveFailed, 'error')
+    }
+  }
+  doVote(song, reveal)
+}
+
 const handleVote = async (song) => {
   // 检查用户是否登录
   if (!isAuthenticated.value) {
@@ -944,21 +1063,34 @@ const handleVote = async (song) => {
     return
   }
 
-  voteInProgress.value = true
-  try {
-    if (song.voted) {
-      // 如果已投票，则调用撤销投票
-      emit('vote', { ...song, unvote: true })
-    } else {
-      // 正常投票
-      emit('vote', song)
-    }
-  } catch (err) {
-    // 投票处理失败
-  } finally {
-    voteInProgress.value = false
+  // 撤销点赞不询问
+
+  if (song.voted) {
+
+    doVote(song, false)
+
+    return
+
   }
-}
+
+  // 已记住偏好：直接用
+
+  if (revealMode.value === 'ANONYMOUS' || revealMode.value === 'REVEAL') {
+
+    doVote(song, revealMode.value === 'REVEAL')
+
+    return
+
+  }
+
+  // 默认：弹窗让同学选匿名/署名
+
+  revealChoice.value = 'ANONYMOUS'
+
+  rememberChoice.value = false
+
+  pendingVoteSong.value = song
+  }
 
 // 处理撤回
 const handleWithdraw = (song) => {
@@ -1056,75 +1188,15 @@ const getFirstChar = (title) => {
   return title.trim().charAt(0)
 }
 
-// 播放歌曲的辅助函数，处理 URL 获取和播放列表构建
-const playSongWithUrlFetching = async (song) => {
-  let url = null
-  try {
-    url = await getMusicUrl(song)
-  } catch (error) {
-    if (!isBilibiliSong(song)) {
-      if (window.$showNotification) {
-        window.$showNotification(locale.value.musicUrlFailed, 'error')
-      }
+// 播放逻辑共用社区与投稿列表：这里额外传入列表构建器，播完自动接下一首
+const { togglePlaySong } = useSongPlayback({
+  buildPlaylist: (song) => buildPlayablePlaylist(song),
+  onUrlError: () => {
+    if (window.$showNotification) {
+      window.$showNotification(locale.value.musicUrlFailed, 'error')
     }
   }
-
-  const playableSong = { ...song, musicUrl: url || null }
-  const playlist = await buildPlayablePlaylist(song)
-  const currentIndex = playlist.findIndex((item) => item.id === song.id)
-  audioPlayer.playSong(playableSong, playlist, currentIndex)
-
-  if (!url && !isBilibiliSong(song)) return
-
-  // 后台预取后续歌曲的播放链接（不阻塞当前播放）
-  ;(async () => {
-    for (let i = currentIndex + 1; i < playlist.length; i++) {
-      const s = playlist[i]
-      if (!s.musicUrl && ((s.musicPlatform && s.musicId) || s.playUrl)) {
-        try {
-          s.musicUrl = await getMusicUrl(s)
-        } catch (error) {
-          console.warn(`后台预取失败: ${s.title}`, error)
-          s.musicUrl = null
-        }
-      }
-    }
-  })()
-}
-
-// 切换歌曲播放/暂停
-const togglePlaySong = async (song) => {
-  // 检查是否为当前歌曲且正在播放
-  if (audioPlayer.isCurrentSong(song.id) && audioPlayer.getPlayingStatus().value) {
-    // 如果正在播放，则暂停
-    audioPlayer.pauseSong()
-    return
-  }
-
-  // 如果是当前歌曲但已暂停，则恢复播放
-  if (audioPlayer.isCurrentSong(song.id) && !audioPlayer.getPlayingStatus().value) {
-    // 检查当前全局歌曲是否有URL
-    const currentGlobalSong = audioPlayer.getCurrentSong().value
-    if (
-      currentGlobalSong &&
-      (currentGlobalSong.musicUrl || isBilibiliSong(currentGlobalSong))
-    ) {
-      // 如果有URL或者是哔哩哔哩视频，直接恢复播放
-      audioPlayer.playSong(currentGlobalSong)
-    } else {
-      // 如果没有URL，重新获取
-      if ((song.musicPlatform && song.musicId) || song.playUrl) {
-        await playSongWithUrlFetching(song)
-      }
-    }
-    return
-  }
-
-  // 如果有平台和ID信息或playUrl，动态获取URL
-  if ((song.musicPlatform && song.musicId) || song.playUrl) {
-    await playSongWithUrlFetching(song)
-  }
-}
+})
 
 // 构建可播放的播放列表
 const buildPlayablePlaylist = async (currentSong) => {
@@ -2212,6 +2284,17 @@ const vRipple = {
   width: 100%;
 }
 
+.requester-link {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.requester-link:hover {
+  color: var(--primary, #3b82f6);
+  border-bottom-color: var(--primary, #3b82f6);
+}
+
 .requester {
   font-family: 'MiSans', sans-serif;
   font-weight: normal;
@@ -2367,6 +2450,21 @@ const vRipple = {
   border-radius: 4px;
   font-size: 0.7rem;
   color: var(--card-code-text);
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* 匿名投稿角标（仅投稿人本人可见） */
+.anonymous-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.4rem;
+  background: var(--warning-15);
+  border: 1px solid var(--warning-20);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: var(--color-warning-light);
   margin-left: 0.5rem;
   flex-shrink: 0;
   align-self: center;

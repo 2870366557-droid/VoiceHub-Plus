@@ -1,6 +1,7 @@
 import { createError, defineEventHandler } from 'h3'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { isServerlessRuntime } from '~~/server/utils/serverless-runtime'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -13,10 +14,8 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    // 检测运行环境
-    const isVercel = process.env.VERCEL || process.env.VERCEL_ENV
-    const isNetlify = process.env.NETLIFY
-    const isServerless = isVercel || isNetlify
+    // 检测运行环境（与连接池等处共用一份判定）
+    const isServerless = isServerlessRuntime()
 
     if (isServerless) {
       // 在无服务器环境中，无法持久化存储文件，返回空列表
@@ -38,7 +37,7 @@ export default defineEventHandler(async (event) => {
       // 如果目录不存在，尝试创建它
       try {
         await fs.mkdir(backupDir, { recursive: true })
-      } catch (mkdirError) {
+      } catch (mkdirError: any) {
         console.warn('无法创建备份目录，可能在只读文件系统中:', mkdirError.message)
         return {
           success: true,
@@ -96,7 +95,7 @@ export default defineEventHandler(async (event) => {
               totalRecords: backupData.totalUsers || backupData.users.length
             }
           }
-        } catch (parseError) {
+        } catch (parseError: any) {
           console.warn(`无法解析备份文件 ${filename}:`, parseError.message)
         }
 
@@ -135,7 +134,7 @@ export default defineEventHandler(async (event) => {
           type,
           isValid: metadata !== null
         })
-      } catch (error) {
+      } catch (error: any) {
         console.error(`处理备份文件 ${filename} 失败:`, error)
       }
     }
@@ -148,7 +147,7 @@ export default defineEventHandler(async (event) => {
       backups,
       total: backups.length
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('获取备份文件列表失败:', error)
     throw createError({
       statusCode: 500,

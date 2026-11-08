@@ -1,4 +1,8 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import bcrypt from 'bcryptjs'
+import { sendAccountEmail, formatMailTime, notifyLoginSuccess, notifyLoginFailure } from '~~/server/utils/accountNotifications'
 import { db } from '~/drizzle/db'
 import { users } from '~/drizzle/schema'
 import { eq } from 'drizzle-orm'
@@ -9,6 +13,7 @@ import { createApiError } from '~~/server/utils/apiError'
 import { JWTEnhanced } from '~~/server/utils/jwt-enhanced'
 import { isSecureRequest } from '~~/server/utils/request-utils'
 import { getPasswordPolicyViolation } from '~/utils/password-policy'
+import { assertPasswordTurnstile } from '~~/server/utils/password-turnstile'
 import {
   PASSWORD_AUDIT_ACTIONS,
   consumePasswordRateLimit,
@@ -27,6 +32,7 @@ export default defineEventHandler(async (event) => {
   const clientIp = getClientIP(event)
 
   const body = await readBody<Record<string, unknown> | null>(event)
+  await assertPasswordTurnstile(body, clientIp)
   const currentPassword = typeof body?.currentPassword === 'string' ? body.currentPassword : ''
   const newPassword = typeof body?.newPassword === 'string' ? body.newPassword : ''
   if (!currentPassword || !newPassword) {
@@ -114,12 +120,17 @@ export default defineEventHandler(async (event) => {
       httpOnly: true,
       secure: isSecureRequest(event),
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7,
+      maxAge: 60 * 60 * 6,
       path: '/'
     })
 
     // 记录成功的密码修改
     await recordLoginSuccess(userDetails.username, clientIp)
+
+    void sendAccountEmail(user.id, 'account.password.changed', {
+      time: formatMailTime(),
+      ip: clientIp || ''
+    })
 
     return {
       success: true,

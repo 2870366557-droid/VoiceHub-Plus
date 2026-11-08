@@ -1,3 +1,5 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import { getHeader } from 'h3'
 import { randomUUID } from 'node:crypto'
 import { authSessions, db, eq } from '~/drizzle/db'
@@ -9,7 +11,7 @@ import { JWTEnhanced } from '~~/server/utils/jwt-enhanced'
 import { createApiError } from '~~/server/utils/apiError'
 import { SERVER_ERROR_CODES } from '~~/server/config/constants'
 
-export const AUTH_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
+export const AUTH_SESSION_MAX_AGE_SECONDS = 60 * 60 * 6
 
 function getSessionExpiry() {
   const expiresAt = getServerDate()
@@ -90,7 +92,7 @@ export async function createAuthSession(event: H3Event, user: SessionUser, login
       ...metadata,
       loginMethod
     })
-  } catch (error) {
+  } catch (error: any) {
     if (!isAuthSessionStorageError(error)) throw error
     console.error('[Auth] auth_sessions 表不可用，拒绝签发无法撤销的登录令牌:', error)
     throw createApiError(

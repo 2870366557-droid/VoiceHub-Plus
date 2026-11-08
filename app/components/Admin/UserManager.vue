@@ -1,3 +1,8 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+<!--
+Modified by YH-Chen on 2026-10-17
+-->
 <template>
   <div class="max-w-[1400px] mx-auto space-y-6 pb-20 px-2">
     <!-- Header -->
@@ -36,6 +41,14 @@
         >
           <Layers class="text-info" :size="14" />
           {{ locale.update }}
+        </button>
+        <button
+          class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-bg-secondary border border-border-secondary text-text-secondary text-xs font-black rounded-lg transition-all uppercase tracking-widest hover:border-primary-30 hover:text-primary"
+          :title="batchForceLocale.desc"
+          @click="showBatchForceUpdate = true"
+        >
+          <UserCog class="text-primary" :size="14" />
+          {{ batchForceLocale.button }}
         </button>
       </div>
     </div>
@@ -254,19 +267,19 @@
       <template v-else>
         <!-- 桌面端表格 -->
         <div
-          class="hidden lg:block bg-bg-secondary-20 border border-border-secondary-50 rounded-xl overflow-hidden shadow-lg custom-scrollbar"
+          class="hidden lg:block bg-bg-secondary-20 border border-border-secondary-50 rounded-xl overflow-x-auto shadow-lg custom-scrollbar"
         >
-          <table class="w-full">
+          <table class="w-full min-w-[760px]">
             <thead>
               <tr
                 class="bg-bg-secondary-60 border-b border-border-secondary text-[10px] font-black text-text-disabled uppercase tracking-widest"
               >
-                <th class="px-6 py-5 text-left">{{ locale.table.userDetails }}</th>
-                <th class="px-6 py-5 text-left">{{ locale.table.role }}</th>
-                <th class="px-6 py-5 text-left">{{ locale.table.status }}</th>
-                <th class="px-6 py-5 text-center">{{ locale.table.class }}</th>
-                <th class="px-6 py-5 text-left">{{ locale.table.lastActivity }}</th>
-                <th class="px-6 py-5 text-right pr-10">{{ locale.table.actions }}</th>
+                <th class="whitespace-nowrap px-4 py-4 text-left">{{ locale.table.userDetails }}</th>
+                <th class="whitespace-nowrap px-4 py-4 text-left">{{ locale.table.role }}</th>
+                <th class="whitespace-nowrap px-4 py-4 text-left">{{ locale.table.status }}</th>
+                <th class="whitespace-nowrap px-4 py-4 text-center">{{ locale.table.class }}</th>
+                <th class="whitespace-nowrap px-4 py-4 text-left">{{ locale.table.lastActivity }}</th>
+                <th class="whitespace-nowrap px-4 py-4 text-right pr-10">{{ locale.table.actions }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-panel-bg-dark-40">
@@ -276,7 +289,7 @@
                 class="group hover:bg-bg-tertiary-30 transition-all text-xs cursor-pointer"
                 @click="showUserDetail(user, $event)"
               >
-                <td class="px-6 py-5">
+                <td class="px-4 py-4">
                   <div class="flex items-center gap-4">
                     <img
                       v-if="user.avatar && !failedImages[user.id]"
@@ -298,79 +311,79 @@
                     </div>
                   </div>
                 </td>
-                <td class="px-6 py-5">
+                <td class="px-4 py-4">
                   <span
                     v-if="user.role === 'SUPER_ADMIN'"
-                    class="px-2 py-0.5 bg-warning-10 text-warning text-[10px] font-black rounded border border-warning-20 uppercase tracking-widest"
+                    class="px-2 py-0.5 whitespace-nowrap bg-warning-10 text-warning text-[10px] font-black rounded border border-warning-20 uppercase tracking-widest"
                     >{{ getRoleName('SUPER_ADMIN') }}</span
                   >
                   <span
                     v-else-if="user.role === 'ADMIN'"
-                    class="px-2 py-0.5 bg-primary-10 text-primary text-[10px] font-black rounded border border-primary-20 uppercase tracking-widest"
+                    class="px-2 py-0.5 whitespace-nowrap bg-primary-10 text-primary text-[10px] font-black rounded border border-primary-20 uppercase tracking-widest"
                     >{{ getRoleName('ADMIN') }}</span
                   >
                   <span
                     v-else-if="user.role === 'SONG_ADMIN'"
-                    class="px-2 py-0.5 bg-info-10 text-info text-[10px] font-black rounded border border-info-20 uppercase tracking-widest"
+                    class="px-2 py-0.5 whitespace-nowrap bg-info-10 text-info text-[10px] font-black rounded border border-info-20 uppercase tracking-widest"
                     >{{ getRoleName('SONG_ADMIN') }}</span
                   >
                   <span
                     v-else
-                    class="px-2 py-0.5 bg-bg-tertiary text-text-tertiary text-[10px] font-black rounded border border-border-tertiary-50 uppercase tracking-widest"
+                    class="px-2 py-0.5 whitespace-nowrap bg-bg-tertiary text-text-tertiary text-[10px] font-black rounded border border-border-tertiary-50 uppercase tracking-widest"
                     >{{ getRoleName('USER') }}</span
                   >
                 </td>
-                <td class="px-6 py-5">
+                <td class="px-4 py-4">
                   <div
                     v-if="user.status === 'active'"
-                    class="flex items-center gap-1.5 text-success font-black uppercase text-[10px] tracking-widest"
+                    class="flex items-center gap-1.5 whitespace-nowrap text-success font-black uppercase text-[10px] tracking-widest"
                   >
                     <div
-                      class="w-1.5 h-1.5 rounded-full bg-success shadow-[0_0_8px_var(--success-50)]"
+                      class="w-1.5 h-1.5 shrink-0 rounded-full bg-success shadow-[0_0_8px_var(--success-50)]"
                     />
                     {{ getStatusName('active') }}
                   </div>
                   <div
                     v-else-if="user.status === 'pending'"
-                    class="flex items-center gap-1.5 text-info font-black uppercase text-[10px] tracking-widest"
+                    class="flex items-center gap-1.5 whitespace-nowrap text-info font-black uppercase text-[10px] tracking-widest"
                   >
                     <div
-                      class="w-1.5 h-1.5 rounded-full bg-info shadow-[0_0_8px_var(--info-50)]"
+                      class="w-1.5 h-1.5 shrink-0 rounded-full bg-info shadow-[0_0_8px_var(--info-50)]"
                     />
                     {{ getStatusName('pending') }}
                   </div>
                   <div
                     v-else-if="user.status === 'withdrawn'"
-                    class="flex items-center gap-1.5 text-error font-black uppercase text-[10px] tracking-widest"
+                    class="flex items-center gap-1.5 whitespace-nowrap text-error font-black uppercase text-[10px] tracking-widest"
                   >
-                    <div class="w-1.5 h-1.5 rounded-full bg-error" />
+                    <div class="w-1.5 h-1.5 shrink-0 rounded-full bg-error" />
                     {{ getStatusName('withdrawn') }}
                   </div>
                   <div
                     v-else-if="user.status === 'graduate'"
-                    class="flex items-center gap-1.5 text-warning font-black uppercase text-[10px] tracking-widest"
+                    class="flex items-center gap-1.5 whitespace-nowrap text-warning font-black uppercase text-[10px] tracking-widest"
                   >
-                    <div class="w-1.5 h-1.5 rounded-full bg-warning" />
+                    <div class="w-1.5 h-1.5 shrink-0 rounded-full bg-warning" />
                     {{ getStatusName('graduate') }}
                   </div>
                   <div
                     v-else
                     class="flex items-center gap-1.5 text-text-tertiary font-black uppercase text-[10px] tracking-widest"
                   >
-                    <div class="w-1.5 h-1.5 rounded-full bg-bg-quaternary" />
+                    <div class="w-1.5 h-1.5 shrink-0 rounded-full bg-bg-quaternary" />
                     {{ getStatusName('disabled') }}
                   </div>
                 </td>
-                <td class="px-6 py-5 text-center font-bold text-text-tertiary">
+                <td class="px-4 py-4 text-center font-bold text-text-tertiary">
                   {{ user.grade || '-' }} {{ user.class || '-' }}
                 </td>
-                <td class="px-6 py-5">
+                <td class="px-4 py-4">
                   <p class="text-text-tertiary font-bold">{{ formatDate(user.lastLogin) }}</p>
                   <p class="text-[11px] text-text-secondary font-mono mt-1 flex items-center gap-1">
                     <MapPin :size="10" /> {{ user.lastLoginIp || '-' }}
                   </p>
                 </td>
-                <td class="px-6 py-5 text-right pr-10">
+                <td class="px-4 py-4 text-right pr-10">
                   <div
                     class="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-all action-buttons"
                   >
@@ -404,6 +417,14 @@
                       @click="resetPassword(user)"
                     >
                       <Lock :size="13" />
+                    </button>
+                    <button
+                      :disabled="!canManageUser(user)"
+                      class="p-2 bg-bg-primary border border-border-secondary rounded-xl text-text-tertiary hover:text-primary transition-colors disabled:opacity-20 disabled:cursor-not-allowed action-btn flex items-center justify-center"
+                      :title="locale.actions.forceUpdateUser"
+                      @click="openForceUpdate(user)"
+                    >
+                      <UserCog :size="13" />
                     </button>
                     <button
                       :disabled="!canManageUser(user)"
@@ -497,22 +518,22 @@
                 <div>
                   <span
                     v-if="user.role === 'SUPER_ADMIN'"
-                    class="px-2 py-0.5 bg-warning-10 text-warning text-[10px] font-black rounded border border-warning-20 uppercase tracking-widest"
+                    class="px-2 py-0.5 whitespace-nowrap bg-warning-10 text-warning text-[10px] font-black rounded border border-warning-20 uppercase tracking-widest"
                     >{{ getRoleName('SUPER_ADMIN') }}</span
                   >
                   <span
                     v-else-if="user.role === 'ADMIN'"
-                    class="px-2 py-0.5 bg-primary-10 text-primary text-[10px] font-black rounded border border-primary-20 uppercase tracking-widest"
+                    class="px-2 py-0.5 whitespace-nowrap bg-primary-10 text-primary text-[10px] font-black rounded border border-primary-20 uppercase tracking-widest"
                     >{{ getRoleName('ADMIN') }}</span
                   >
                   <span
                     v-else-if="user.role === 'SONG_ADMIN'"
-                    class="px-2 py-0.5 bg-info-10 text-info text-[10px] font-black rounded border border-info-20 uppercase tracking-widest"
+                    class="px-2 py-0.5 whitespace-nowrap bg-info-10 text-info text-[10px] font-black rounded border border-info-20 uppercase tracking-widest"
                     >{{ getRoleName('SONG_ADMIN') }}</span
                   >
                   <span
                     v-else
-                    class="px-2 py-0.5 bg-bg-tertiary text-text-tertiary text-[10px] font-black rounded border border-border-tertiary-50 uppercase tracking-widest"
+                    class="px-2 py-0.5 whitespace-nowrap bg-bg-tertiary text-text-tertiary text-[10px] font-black rounded border border-border-tertiary-50 uppercase tracking-widest"
                     >{{ getRoleName('USER') }}</span
                   >
                 </div>
@@ -566,6 +587,14 @@
                 @click="resetPassword(user)"
               >
                 <Lock :size="12" /> {{ locale.actions.reset }}
+              </button>
+              <button
+                :disabled="!canManageUser(user)"
+                class="flex items-center justify-center px-3 py-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-tertiary active:bg-primary active:text-text-primary transition-colors disabled:opacity-20 action-btn"
+                :title="locale.actions.forceUpdateUser"
+                @click="openForceUpdate(user)"
+              >
+                <UserCog :size="14" />
               </button>
               <button
                 :disabled="!canManageUser(user)"
@@ -664,6 +693,9 @@
                       type="text"
                     >
                   </div>
+                  <p class="text-[10px] text-text-tertiary ml-1 leading-relaxed">
+                    {{ locale.errors.usernameInvalid }}
+                  </p>
                 </div>
               </div>
 
@@ -882,6 +914,169 @@
       </div>
     </Transition>
 
+    <!-- 强制更新登录信息模态框 -->
+    <Transition
+      enter-active-class="transition duration-300 ease-out"
+      enter-from-class="opacity-0 scale-95"
+      enter-to-class="opacity-100 scale-100"
+      leave-active-class="transition duration-200 ease-in"
+      leave-from-class="opacity-100 scale-100"
+      leave-to-class="opacity-0 scale-95"
+    >
+      <div
+        v-if="forceUpdateUser"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-bg-primary-80 backdrop-blur-sm"
+        @click="closeForceUpdate"
+      >
+        <div
+          class="bg-bg-secondary border border-border-secondary w-full max-w-md rounded-3xl overflow-hidden shadow-2xl"
+          @click.stop
+        >
+          <div class="p-8">
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex items-start gap-3">
+                <div
+                  class="w-12 h-12 rounded-2xl bg-primary-hover-10 text-primary flex items-center justify-center shrink-0"
+                >
+                  <UserCog :size="22" />
+                </div>
+                <div>
+                  <h3 class="text-xl font-black text-text-primary tracking-tight">
+                    {{ locale.forceUpdateModal.title }}
+                  </h3>
+                  <p class="text-xs text-text-tertiary mt-1 leading-relaxed">
+                    {{ formatMessage(locale.forceUpdateModal.desc, forceUpdateUser.name) }}
+                  </p>
+                </div>
+              </div>
+              <button
+                class="flex items-center justify-center p-2.5 bg-bg-tertiary-50 hover:bg-bg-tertiary text-text-tertiary hover:text-text-primary rounded-xl transition-all shrink-0"
+                @click="closeForceUpdate"
+              >
+                <X :size="18" />
+              </button>
+            </div>
+
+            <div class="mt-6 space-y-3">
+              <button
+                type="button"
+                class="w-full flex items-center gap-3 p-4 rounded-2xl border text-left transition-all"
+                :class="
+                  forceForm.password
+                    ? 'border-primary-30 bg-primary-hover-10'
+                    : 'border-border-secondary-50 bg-bg-primary-50 hover:border-border-tertiary'
+                "
+                @click="forceForm.password = !forceForm.password"
+              >
+                <div
+                  class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                  :class="forceForm.password ? 'bg-primary text-white' : 'bg-bg-tertiary text-text-tertiary'"
+                >
+                  <Key :size="16" />
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs font-black text-text-primary">
+                    {{ locale.forceUpdateModal.passwordTitle }}
+                  </p>
+                  <p class="text-[10px] text-text-tertiary mt-0.5 leading-relaxed">
+                    {{ locale.forceUpdateModal.passwordDesc }}
+                  </p>
+                  <p
+                    v-if="forceUpdateUser.forcePasswordChange"
+                    class="text-[10px] text-warning font-bold mt-1"
+                  >
+                    {{ locale.forceUpdateModal.pendingPassword }}
+                  </p>
+                </div>
+                <span
+                  class="w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors"
+                  :class="
+                    forceForm.password
+                      ? 'bg-primary border-primary text-white'
+                      : 'border-border-tertiary text-transparent'
+                  "
+                >
+                  <Check :size="12" />
+                </span>
+              </button>
+
+              <button
+                type="button"
+                class="w-full flex items-center gap-3 p-4 rounded-2xl border text-left transition-all"
+                :class="
+                  forceForm.username
+                    ? 'border-primary-30 bg-primary-hover-10'
+                    : 'border-border-secondary-50 bg-bg-primary-50 hover:border-border-tertiary'
+                "
+                @click="forceForm.username = !forceForm.username"
+              >
+                <div
+                  class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                  :class="forceForm.username ? 'bg-primary text-white' : 'bg-bg-tertiary text-text-tertiary'"
+                >
+                  <AtSign :size="16" />
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs font-black text-text-primary">
+                    {{ locale.forceUpdateModal.usernameTitle }}
+                  </p>
+                  <p class="text-[10px] text-text-tertiary mt-0.5 leading-relaxed">
+                    {{ locale.forceUpdateModal.usernameDesc }}
+                  </p>
+                  <p
+                    v-if="forceUpdateUser.forceUsernameChange"
+                    class="text-[10px] text-warning font-bold mt-1"
+                  >
+                    {{ locale.forceUpdateModal.pendingUsername }}
+                  </p>
+                </div>
+                <span
+                  class="w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors"
+                  :class="
+                    forceForm.username
+                      ? 'bg-primary border-primary text-white'
+                      : 'border-border-tertiary text-transparent'
+                  "
+                >
+                  <Check :size="12" />
+                </span>
+              </button>
+            </div>
+
+            <p class="mt-4 text-[11px] text-text-tertiary leading-relaxed">
+              {{ locale.forceUpdateModal.tip }}
+            </p>
+
+            <div
+              v-if="forceUpdateError"
+              class="mt-4 p-4 bg-error-10 border border-error-20 rounded-2xl flex items-center gap-3 text-error text-xs"
+            >
+              <AlertCircle :size="16" />
+              {{ forceUpdateError }}
+            </div>
+
+            <div class="flex gap-3 mt-6">
+              <button
+                class="flex-1 px-6 py-4 bg-bg-tertiary hover:bg-bg-quaternary text-text-secondary text-xs font-black rounded-2xl transition-all uppercase tracking-widest"
+                @click="closeForceUpdate"
+              >
+                {{ locale.forceUpdateModal.cancel }}
+              </button>
+              <button
+                :disabled="forceUpdating || !canSubmitForceUpdate"
+                class="flex-[2] px-6 py-4 bg-primary hover:bg-primary-hover text-white text-xs font-black rounded-2xl transition-all uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg active:scale-95"
+                @click="confirmForceUpdate"
+              >
+                <Save v-if="!forceUpdating" :size="16" />
+                <RefreshCw v-else class="animate-spin" :size="16" />
+                {{ forceUpdating ? locale.forceUpdateModal.confirming : locale.forceUpdateModal.confirm }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 批量导入用户模态框 -->
     <Transition
       enter-active-class="transition duration-300 ease-out"
@@ -1063,7 +1258,7 @@
                         <td class="px-4 py-3">{{ row.username }}</td>
                         <td class="px-4 py-3">
                           <span
-                            class="px-2 py-0.5 bg-bg-tertiary rounded-md text-[10px] text-text-tertiary uppercase"
+                            class="px-2 py-0.5 whitespace-nowrap bg-bg-tertiary rounded-md text-[10px] text-text-tertiary uppercase"
                             >{{ row.role }}</span
                           >
                         </td>
@@ -1123,6 +1318,14 @@
       :users="users"
       @close="closeBatchUpdateModal"
       @update-success="handleBatchUpdateSuccess"
+    />
+
+    <!-- 批量强制更新登录信息模态框 -->
+    <ForceUpdateBatchModal
+      :show="showBatchForceUpdate"
+      :users="users"
+      @close="showBatchForceUpdate = false"
+      @success="handleBatchForceUpdateSuccess"
     />
 
     <!-- 导出用户模态框 -->
@@ -1315,6 +1518,38 @@
                         :size="16"
                       />
                       <AlertCircle v-else :size="16" />
+                    </div>
+                  </div>
+                  <div
+                    class="p-4 bg-bg-primary-50 border border-border-secondary-50 rounded-2xl flex items-center justify-between"
+                  >
+                    <div class="space-y-1 overflow-hidden pr-2">
+                      <div class="text-[10px] font-black text-text-disabled uppercase tracking-tighter">
+                        {{ locale.detail.usernameStatus }}
+                      </div>
+                      <div
+                        class="text-sm font-bold truncate"
+                        :class="
+                          selectedUserDetail.forceUsernameChange ? 'text-warning' : 'text-success'
+                        "
+                      >
+                        {{
+                          selectedUserDetail.forceUsernameChange
+                            ? locale.detail.requireUsernameChange
+                            : locale.detail.usernameNormal
+                        }}
+                      </div>
+                    </div>
+                    <div
+                      :class="[
+                        'w-8 h-8 rounded-xl flex items-center justify-center shrink-0',
+                        selectedUserDetail.forceUsernameChange
+                          ? 'bg-warning-10 text-warning'
+                          : 'bg-success-10 text-success'
+                      ]"
+                    >
+                      <AlertCircle v-if="selectedUserDetail.forceUsernameChange" :size="16" />
+                      <CheckCircle2 v-else :size="16" />
                     </div>
                   </div>
                   <div
@@ -1660,6 +1895,7 @@ import Pagination from '~/components/UI/Common/Pagination.vue'
 import UserSongsModal from '~/components/Admin/UserSongsModal.vue'
 import OAuthBindingsModal from '~/components/Admin/OAuthBindingsModal.vue'
 import BatchUpdateModal from '~/components/Admin/BatchUpdateModal.vue'
+import ForceUpdateBatchModal from '~/components/Admin/ForceUpdateBatchModal.vue'
 import UserExportModal from '~/components/Admin/UserExportModal.vue'
 import UserApprovalModal from '~/components/Admin/UserApprovalModal.vue'
 import ConfirmDialog from '~/components/UI/ConfirmDialog.vue'
@@ -1682,7 +1918,14 @@ const formatMessage = (value, ...args) => {
   return ''
 }
 const getRoleName = (role) => {
-  const aliases = { USER: 'user', SONG_ADMIN: 'songAdmin', ADMIN: 'admin', SUPER_ADMIN: 'superAdmin' }
+  const aliases = {
+    USER: 'user',
+    SONG_ADMIN: 'songAdmin',
+    BROADCASTER: 'broadcaster',
+    REVIEWER: 'reviewer',
+    ADMIN: 'admin',
+    SUPER_ADMIN: 'superAdmin'
+  }
   return locale.value?.roles?.[aliases[role]] || role
 }
 const getStatusName = (status) => locale.value?.statuses?.[status] || status
@@ -1740,6 +1983,8 @@ const currentSort = computed({
 const allRoles = computed(() => [
   { name: 'USER', displayName: getRoleName('USER') },
   { name: 'SONG_ADMIN', displayName: getRoleName('SONG_ADMIN') },
+  { name: 'BROADCASTER', displayName: getRoleName('BROADCASTER') },
+  { name: 'REVIEWER', displayName: getRoleName('REVIEWER') },
   { name: 'ADMIN', displayName: getRoleName('ADMIN') },
   { name: 'SUPER_ADMIN', displayName: getRoleName('SUPER_ADMIN') }
 ])
@@ -1781,6 +2026,17 @@ const resetPasswordUser = ref(null)
 const resetting = ref(false)
 const passwordError = ref('')
 
+// 强制更新登录信息状态
+const forceUpdateUser = ref(null)
+const forceUpdating = ref(false)
+const forceUpdateError = ref('')
+const forceForm = ref({ password: false, username: false })
+const canSubmitForceUpdate = computed(() => {
+  if (forceForm.value.password || forceForm.value.username) return true
+  // 两项都不勾 = 取消已下发的要求（仅当当前确实有要求时才允许提交）
+  return Boolean(forceUpdateUser.value?.forcePasswordChange || forceUpdateUser.value?.forceUsernameChange)
+})
+
 // 批量导入状态
 const showImportModal = ref(false)
 const importLoading = ref(false)
@@ -1793,6 +2049,8 @@ const importProgressText = ref('')
 
 // 批量更新状态
 const showBatchUpdateModal = ref(false)
+const showBatchForceUpdate = ref(false)
+const batchForceLocale = computed(() => locale.value.batchForceUpdate || {})
 
 // 导出用户状态
 const showExportModal = ref(false)
@@ -2262,6 +2520,17 @@ const handleBatchUpdateSuccess = async () => {
   await Promise.all([loadUserTree(), loadUsers()])
 }
 
+// 批量强制更新成功：提示结果并刷新列表（标记会立即反映到行内状态）
+const handleBatchForceUpdateSuccess = async (result) => {
+  if (window.$showNotification) {
+    window.$showNotification(
+      result?.message || batchForceLocale.value.success,
+      result?.skipped?.length ? 'warning' : 'success'
+    )
+  }
+  await Promise.all([loadUserTree(), loadUsers()])
+}
+
 const closeDeleteModal = () => {
   showDeleteModal.value = false
   deletingUser.value = null
@@ -2316,6 +2585,73 @@ const closeResetPassword = () => {
   passwordForm.value = {
     password: '',
     confirmPassword: ''
+  }
+}
+
+// 打开「强制更新」弹窗：回显该用户当前是否已处于强制状态
+const openForceUpdate = (user) => {
+  if (isSelf(user)) {
+    if (window.$showNotification) {
+      window.$showNotification(locale.value.notifications.selfResetForbidden, 'warning')
+    }
+    return
+  }
+  forceUpdateUser.value = user
+  forceUpdateError.value = ''
+  forceForm.value = {
+    password: Boolean(user.forcePasswordChange),
+    username: Boolean(user.forceUsernameChange)
+  }
+}
+
+const closeForceUpdate = () => {
+  forceUpdateUser.value = null
+  forceUpdateError.value = ''
+  forceForm.value = { password: false, username: false }
+}
+
+const confirmForceUpdate = async () => {
+  if (!forceUpdateUser.value) return
+  if (!canSubmitForceUpdate.value) {
+    forceUpdateError.value = locale.value.forceUpdateModal.nothingSelected
+    return
+  }
+
+  forceUpdating.value = true
+  forceUpdateError.value = ''
+  try {
+    const result = await $fetch(`/api/admin/users/${forceUpdateUser.value.id}/force-update`, {
+      method: 'POST',
+      body: {
+        password: forceForm.value.password,
+        username: forceForm.value.username
+      },
+      ...auth.getAuthConfig()
+    })
+
+    // 列表与详情面板同步最新状态，避免再次打开弹窗时回显旧值
+    const targetId = forceUpdateUser.value.id
+    const applyState = (target) => {
+      if (!target || target.id !== targetId) return
+      target.forcePasswordChange = Boolean(result?.forcePasswordChange)
+      target.forceUsernameChange = Boolean(result?.forceUsernameChange)
+    }
+    applyState(forceUpdateUser.value)
+    applyState(selectedUserDetail.value)
+    applyState(users.value.find((item) => item.id === targetId))
+
+    closeForceUpdate()
+    if (window.$showNotification) {
+      window.$showNotification(
+        result?.message || locale.value.forceUpdateModal.success,
+        'success'
+      )
+    }
+  } catch (error) {
+    console.error('强制更新登录信息失败:', error)
+    forceUpdateError.value = getErrorDetail(error) || locale.value.forceUpdateModal.failed
+  } finally {
+    forceUpdating.value = false
   }
 }
 
@@ -2456,6 +2792,18 @@ const saveUser = async () => {
   }
   if (!userForm.value.name || !userForm.value.username) {
     formError.value = locale.value.errors.requiredInfo
+    return
+  }
+
+  // 用户名规则（与服务端同口径）：禁中文、2-20 位、禁纯数字
+  const usernameCandidate = userForm.value.username.trim()
+  if (
+    usernameCandidate.length < 2 ||
+    usernameCandidate.length > 20 ||
+    !/^[A-Za-z0-9_]+$/.test(usernameCandidate) ||
+    /^\d+$/.test(usernameCandidate)
+  ) {
+    formError.value = locale.value.errors.usernameInvalid
     return
   }
 
@@ -2755,10 +3103,11 @@ const loadXLSX = async () => {
   if (typeof window !== 'undefined' && !xlsxLoaded.value) {
     try {
       // 使用多个可靠的CDN源，如果一个失败可以尝试另一个
+      // 锁定 0.20.2：0.18.5 存在原型污染（CVE-2023-30533）与 ReDoS（CVE-2024-22363）两个高危漏洞，
+      // SheetJS 已停止向 npm 发布新版本，官方 CDN 为唯一修复版来源（2026-10-23 安全加固）
       const cdnUrls = [
-        'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
-        'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js',
-        'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+        'https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js',
+        'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
       ]
 
       // 尝试加载第一个CDN

@@ -1,11 +1,13 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import bcrypt from 'bcryptjs'
 import { getRequestHeader } from 'h3'
+import { sendAccountEmail, formatMailTime, notifyLoginSuccess, notifyLoginFailure } from '~~/server/utils/accountNotifications'
 import { db, eq, users, userIdentities, and } from '~/drizzle/db'
 import { JWTEnhanced } from '~~/server/utils/jwt-enhanced'
 import {
-  getAccountLockRemainingTime,
   getIPBlockRemainingTime,
-  isAccountLocked,
   isIPBlocked,
   recordLoginFailure,
   recordLoginSuccess,
@@ -18,15 +20,17 @@ import {
 import { getBeijingTime } from '~/utils/timeUtils'
 import { getClientIP } from '~~/server/utils/ip-utils'
 import { resolveRequirePasswordChange } from '~~/server/utils/system-settings-helper'
-import { getRequestHostname } from '~~/server/utils/request-utils'
-import { resolveEsaCaptchaSceneId } from '~/utils/esaCaptcha'
+import { verifyEsaCaptchaPass } from '~~/server/utils/esa-captcha-pass'
 import { getPasswordSetupState } from '~~/server/utils/initial-password-policy'
-import { ALIYUN_ESA_CAPTCHA_VERIFY_HEADER } from '~~/server/config/constants'
 
 // 导入验证码校验函数
 import { verifyAndConsumeCaptcha } from '~~/server/utils/captcha'
+
+// 用户不存在时执行同等成本的 bcrypt 比较，抹平时序侧信道（2026-10-23 安全加固）
+const DUMMY_BCRYPT_HASH = '$2a$10$vnKaCYoD4PXLMsHYyO5Mguv2Re7QihXvQDJA2Lw2SGo.GhSHrT6.S'
 import { createApiError } from '~~/server/utils/apiError'
 import { createAuthSession } from '~~/server/utils/auth-session'
+import { recordLoginAttempt } from '~~/server/utils/loginAttempt'
 
 export default defineEventHandler(async (event) => {
   const startTime = Date.now()
@@ -50,7 +54,7 @@ export default defineEventHandler(async (event) => {
     // 数据库连接检查 - 使用简单的查询测试连接
     try {
       await db.select().from(users).limit(1)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Database connection error:', error)
       throw createApiError(503, 'AUTH_DATABASE_UNAVAILABLE', '数据库服务暂时不可用')
     }
@@ -58,13 +62,8 @@ export default defineEventHandler(async (event) => {
     // 检查IP是否被限制
     if (await isIPBlocked(clientIp)) {
       const remainingTime = await getIPBlockRemainingTime(clientIp)
+      await recordLoginAttempt(event, { username: body.username, result: 'account_locked', detail: `IP 锁定 ${remainingTime} 分钟` })
       throw createApiError(423, 'AUTH_IP_BLOCKED_RETRY_MINUTES', `您的IP地址已被限制访问，请在 ${remainingTime} 分钟后重试`, { params: [remainingTime] })
-    }
-
-    // 检查账户是否被锁定
-    if (await isAccountLocked(body.username)) {
-      const remainingTime = await getAccountLockRemainingTime(body.username)
-      throw createApiError(423, 'AUTH_ACCOUNT_LOCKED_MINUTES', `账户已被锁定，请在 ${remainingTime} 分钟后重试`, { params: [remainingTime] })
     }
 
     // 读取验证码配置并判断是否需要验证码（阈值 0 = 每次必验；用户名/IP 任一维度达标即要求）
@@ -108,13 +107,9 @@ export default defineEventHandler(async (event) => {
           throw createApiError(500, 'AUTH_CAPTCHA_SERVICE_UNAVAILABLE', '人机验证服务暂时不可用')
         }
       } else if (captchaSettings.provider === 'esa') {
-        // ESA 验签在边缘完成，源站无服务端验签接口，只能判断验签参数是否随请求到达
-        // 前提：源站必须只接受 ESA 回源流量，否则直连源站即可附带任意请求头绕过验证
-        // 当前接口+域名未配置可用场景 ID 时，边缘不会拦截该请求，视为未开启人机验证，不拦截登录
-        const esaSceneId = resolveEsaCaptchaSceneId(captchaSettings.esaScenes, 'login', getRequestHostname(event))
-        if (esaSceneId && !getRequestHeader(event, ALIYUN_ESA_CAPTCHA_VERIFY_HEADER)) {
-          throw createApiError(400, 'AUTH_CAPTCHA_REQUIRED', '请完成人机验证', { captchaRequired: true, captchaProvider: 'esa' })
-        }
+        // ESA 验签在边缘对公共验证接口 /api/captcha/verify 完成，通过后源站签发短期凭证；
+        // 此处校验凭证（绑定用途与签发域名）。当前域名无可用场景 ID 时视为未开启人机验证，不拦截登录
+        verifyEsaCaptchaPass(event, captchaSettings.esaScenes, 'login')
       } else {
         captchaId = body.captchaId
         captchaInput = body.captchaInput
@@ -143,6 +138,7 @@ export default defineEventHandler(async (event) => {
         lastLoginIp: users.lastLoginIp,
         passwordChangedAt: users.passwordChangedAt,
         forcePasswordChange: users.forcePasswordChange,
+        forceUsernameChange: users.forceUsernameChange,
         tokenVersion: users.tokenVersion,
         status: users.status,
         email: users.email,
@@ -156,7 +152,12 @@ export default defineEventHandler(async (event) => {
 
     if (!user) {
       // 记录登录失败（用户不存在）
+      await recordLoginAttempt(event, { username: body.username, result: 'no_user' })
       await recordLoginFailure(body.username, clientIp)
+      void notifyLoginFailure(body.username, clientIp)
+      // 与"用户存在"路径执行同等成本的 bcrypt 比较，消除响应时间差异，
+      // 避免统计性用户名枚举（2026-10-23 安全加固）
+      await bcrypt.compare(body.password, DUMMY_BCRYPT_HASH).catch(() => false)
       throw createApiError(401, 'AUTH_INVALID_CREDENTIALS', '用户名或密码错误')
     }
 
@@ -164,13 +165,25 @@ export default defineEventHandler(async (event) => {
     const isPasswordValid = await bcrypt.compare(body.password, user.password)
     if (!isPasswordValid) {
       // 记录登录失败（密码错误）
+      await recordLoginAttempt(event, { username: body.username, result: 'wrong_password' })
       await recordLoginFailure(body.username, clientIp)
+      void notifyLoginFailure(body.username, clientIp)
       throw createApiError(401, 'AUTH_INVALID_CREDENTIALS', '用户名或密码错误')
     }
 
     // 检查用户状态 (移到2FA之前，防止已退学用户进行2FA验证)
+    if (['withdrawn', 'merged', 'graduate', 'banned', 'pending', 'rejected'].includes(user.status)) {
+      await recordLoginAttempt(event, { username: body.username, result: 'status_rejected', detail: user.status })
+    }
     if (user.status === 'withdrawn') {
       throw createApiError(403, 'AUTH_ACCOUNT_WITHDRAWN', '该账号已退学，限制访问')
+    } else if (user.status === 'merged') {
+      // 重复注册清理：该账号已被合并进同名的原账号，引导用原账号登录
+      throw createApiError(
+        403,
+        'AUTH_ACCOUNT_MERGED',
+        '该账号已合并到你的原账号，请用原账号登录（忘记密码可用邮箱重置）'
+      )
     } else if (user.status === 'graduate') {
       throw createApiError(403, 'AUTH_ACCOUNT_GRADUATED', '该账号已毕业，限制访问')
     } else if (user.status === 'banned') {
@@ -180,6 +193,8 @@ export default defineEventHandler(async (event) => {
     } else if (user.status === 'rejected') {
       throw createApiError(403, 'AUTH_ACCOUNT_CURRENTLY_UNAVAILABLE', '该账号当前不可用')
     }
+    // pending_deletion（自助注销宽限期）：允许登录 —— 登录即视为"回来了"，稍后自动撤销注销
+    const deletionPending = user.status === 'pending_deletion'
 
     // 普通登录不延续绑定流程，避免残留绑定令牌被后续 2FA 校验意外消费
     deleteCookie(event, 'binding-token')
@@ -220,7 +235,17 @@ export default defineEventHandler(async (event) => {
       }
     }
 
+    // 宽限期内登录 → 自动撤销注销申请（30 天没登录才会被真正清理）
+    if (deletionPending) {
+      const { cancelAccountDeletion } = await import('~~/server/api/user/delete-account/cancel.post')
+      await cancelAccountDeletion(user.id, '宽限期内登录了本站').catch((err) => console.error('撤销注销失败:', err))
+    }
+
+    await recordLoginAttempt(event, { username: body.username, result: 'success' })
     await recordLoginSuccess(body.username, clientIp)
+
+    // 登录提醒邮件（30 分钟内不重复发；可在后台「推送配置 → 邮件模板管理」改文案）
+    void notifyLoginSuccess(user, clientIp, getRequestHeader(event, 'user-agent') || '')
 
     const ipSwitchExceeded = await recordAccountIpLogin(body.username, clientIp)
     if (ipSwitchExceeded) {
@@ -253,7 +278,7 @@ export default defineEventHandler(async (event) => {
       httpOnly: true,
       secure: isSecure,
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7天
+      maxAge: 60 * 60 * 6, // 6小时
       path: '/'
     })
 
@@ -265,6 +290,8 @@ export default defineEventHandler(async (event) => {
 
     return {
       success: true,
+      // 本次登录顺带撤销了注销申请时告诉前端，便于提示用户
+      deletionCancelled: deletionPending,
       user: {
         id: user.id,
         username: user.username,
@@ -275,6 +302,7 @@ export default defineEventHandler(async (event) => {
         email: user.email,
         emailVerified: user.emailVerified,
         forcePasswordChange: user.forcePasswordChange,
+        forceUsernameChange: user.forceUsernameChange,
         passwordChangedAt: user.passwordChangedAt,
         requirePasswordChange,
         // 兼容旧客户端字段名

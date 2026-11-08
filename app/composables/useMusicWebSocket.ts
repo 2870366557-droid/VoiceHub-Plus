@@ -1,3 +1,5 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 import { onBeforeUnmount, onMounted, ref, readonly } from 'vue'
 
 interface MusicState {
@@ -35,17 +37,16 @@ export function useMusicWebSocket() {
   const onPlaylistUpdate = ref<((playlist: any[]) => void) | null>(null)
   const onConnectionChange = ref<((connected: boolean) => void) | null>(null)
 
-  // 连接WebSocket
-  const connect = (token?: string) => {
+  // 连接WebSocket（SSE）
+  const connect = () => {
     if (eventSource) {
       disconnect()
     }
 
     try {
+      // 认证令牌由 auth-token cookie 随 EventSource 同源请求自动携带，
+      // 不再放入 URL：URL 会落入 Nginx 访问日志与 Referer（2026-10-23 安全加固）
       const url = new URL('/api/music/websocket', window.location.origin)
-      if (token) {
-        url.searchParams.set('token', token)
-      }
 
       eventSource = new EventSource(url.toString())
 
@@ -64,7 +65,7 @@ export function useMusicWebSocket() {
         try {
           const message = JSON.parse(event.data)
           handleMessage(message)
-        } catch (error) {
+        } catch (error: any) {
           console.error('Failed to parse WebSocket message:', error)
         }
       }
@@ -77,7 +78,7 @@ export function useMusicWebSocket() {
         // 自动重连
         scheduleReconnect()
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create WebSocket connection:', error)
       scheduleReconnect()
     }
@@ -154,7 +155,7 @@ export function useMusicWebSocket() {
           data: state
         }
       })
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to send music state update:', error)
     }
   }
@@ -169,7 +170,7 @@ export function useMusicWebSocket() {
           data: songInfo
         }
       })
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to send song change:', error)
     }
   }
@@ -189,7 +190,7 @@ export function useMusicWebSocket() {
           }
         }
       })
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to send position update:', error)
     }
   }

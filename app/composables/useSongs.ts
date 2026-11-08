@@ -1,9 +1,12 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import { computed, ref } from 'vue'
 import { useAuth } from './useAuth'
 import { extractErrorCode, useServerErrors } from './useLocaleText'
 import { getGlobalDedup } from './useRequestDedup'
 import { useLocale } from '~/utils/locale'
-import type { PlayTime, Schedule, Song } from '~/types'
+import type { PlayTime, Schedule, Song } from '~~/types'
 
 export const useSongs = () => {
   const { isAuthenticated, user, getAuthConfig } = useAuth()
@@ -156,7 +159,8 @@ export const useSongs = () => {
             requester: schedule.song.requester,
             requesterGrade: schedule.song.requesterGrade || null,
             requesterClass: schedule.song.requesterClass || null,
-            requesterId: 0, // 默认值，公共API不提供这个信息
+            // 公共 API 会返回 requesterId（匿名投稿服务端已清空），用于点名字查看对方点赞
+            requesterId: Number(schedule.song.requesterId) || 0,
             voteCount: schedule.song.voteCount,
             played: schedule.song.played || false,
             playedAt: schedule.song.playedAt || null,
@@ -273,6 +277,7 @@ export const useSongs = () => {
     selectionToken?: string
     submissionNote?: string | null
     submissionNotePublic?: boolean
+    submissionAnonymous?: boolean
     cardCode?: string | null
   }) => {
     if (!isAuthenticated.value) {
@@ -313,7 +318,10 @@ export const useSongs = () => {
   }
 
   // 投票
-  const voteSong = async (songId: number | { id: number; unvote?: boolean }) => {
+  const voteSong = async (
+    songId: number | { id: number; unvote?: boolean },
+    options: { revealToRequester?: boolean } = {}
+  ) => {
     if (!isAuthenticated.value) {
       showNotification(actionLocale.value.loginVote, 'error')
       return null
@@ -344,7 +352,9 @@ export const useSongs = () => {
           method: 'POST',
           body: {
             songId: actualSongId,
-            unvote: isUnvote // 添加取消投票参数
+            unvote: isUnvote, // 添加取消投票参数
+            // 点赞人勾选"署名"时，投稿人的通知里会显示昵称
+            revealToRequester: options.revealToRequester === true
           },
           ...authConfig
         })
@@ -512,7 +522,12 @@ export const useSongs = () => {
       // 绕过去重，从数据库重新校准写入后的列表
       await fetchSongs(true, undefined, true)
 
-      showNotification(actionLocale.value.markPlayedSucceeded, 'success')
+      // 广播站批量标记时可能有部分歌曲因排期未到被跳过，服务端会给出说明
+      if (data?.skipped > 0 && data?.message) {
+        showNotification(data.message, 'info')
+      } else {
+        showNotification(actionLocale.value.markPlayedSucceeded, 'success')
+      }
       return data
     } catch (err: any) {
       const errorMsg = err.data?.message || err.message || '标记歌曲失败'

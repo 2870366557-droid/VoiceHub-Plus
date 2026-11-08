@@ -97,12 +97,13 @@
                   {{ user.name.charAt(0) }}
                 </div>
 
-                <!-- 用户信息 -->
+                <!-- 用户信息：只展示姓名，移动端截断避免溢出 -->
                 <div class="flex-1 min-w-0">
                   <div class="font-bold text-text-primary truncate">
                     {{ user.name }}
                   </div>
                   <div
+                    v-if="user.grade || user.class"
                     class="text-[10px] font-black uppercase tracking-widest flex flex-wrap gap-2 mt-0.5 text-text-tertiary"
                   >
                     <span v-if="user.grade" class="flex items-center">
@@ -113,7 +114,6 @@
                       <span class="w-1 h-1 rounded-full bg-current mr-1.5 opacity-40" />
                       {{ user.class }}
                     </span>
-                    <span class="truncate">@{{ user.username }}</span>
                   </div>
                 </div>
 

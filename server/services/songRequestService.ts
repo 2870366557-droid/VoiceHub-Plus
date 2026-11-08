@@ -1,3 +1,6 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+// Modified by YH-Chen on 2026-10-17
 import {
   collaborationLogs,
   db,
@@ -8,13 +11,15 @@ import {
   cardCodes,
   songCollaborators,
   songs,
-  users
+  users,
+  notifications
 } from '~/drizzle/db'
 import { and, eq, gte, gt, inArray, lt, lte, or, sql } from 'drizzle-orm'
 import { createError } from 'h3'
 import { reconcileSongDurationOnSubmit } from '~~/server/services/durationValidationService'
 import { createApiError } from '~~/server/utils/apiError'
 import { createCollaborationInvitationNotification } from '~~/server/services/notificationService'
+import { enqueueAstrbotGroupEvent } from '~~/server/services/astrbotGroupService'
 import {
   isCardCodeLimitBypassActive,
   isLimitReached
@@ -23,7 +28,7 @@ import { getClientIP } from '~~/server/utils/ip-utils'
 import { getBeijingTimeISOString } from '~/utils/timeUtils'
 import { getSystemSettingsCached } from '~~/server/utils/system-settings-helper'
 import { getServerDate } from '~~/server/utils/serverTime'
-import { SERVER_ERROR_CODES, SONG_DURATION_MAX_SECONDS, SONG_DURATION_MIN_SECONDS, SUBMISSION_NOTE_STATUS } from '~~/server/config/constants'
+import { SERVER_ERROR_CODES, SONG_DURATION_MAX_SECONDS, SONG_DURATION_MIN_SECONDS, SUBMISSION_NOTE_MAX_LENGTH, SUBMISSION_NOTE_STATUS } from '~~/server/config/constants'
 import { normalizeForMatch } from '~~/server/utils/song-name-normalize'
 import { resolveSubmissionRestrictionPolicy } from '~~/server/utils/submission-restriction-policy'
 import { z } from 'zod'
@@ -50,10 +55,20 @@ const songRequestBodySchema = z.object({
   musicId: z.string().trim().max(200, '音乐 ID 不能超过200个字符').optional().nullable(),
   bilibiliCid: z.string().trim().max(100, 'Bilibili CID 不能超过100个字符').optional().nullable(),
   bilibiliPage: z.union([z.string(), z.number()]).optional().nullable(),
-  playUrl: z.string().trim().max(2000, '播放链接不能超过2000个字符').optional().nullable(),
+  playUrl: z
+    .string()
+    .trim()
+    .max(2000, '播放链接不能超过2000个字符')
+    .refine((value) => value === '' || /^https?:\/\//i.test(value), '播放链接必须以 http(s):// 开头')
+    .optional()
+    .nullable(),
   durationSeconds: z.number().int().min(SONG_DURATION_MIN_SECONDS, '时长不能为负数').max(SONG_DURATION_MAX_SECONDS, '时长不能超过2小时').optional().nullable(),
-  submissionNote: z.string().trim().max(300, '备注留言不能超过300个字符').optional().nullable(),
+  // 留言长度上限：与 RequestForm.vue 的 maxlength 同源，导出供机器人端点前置校验，
+  // 保持「站点表单 / 机器人 / zod」三处同一个数值
+  submissionNote: z.string().trim().max(SUBMISSION_NOTE_MAX_LENGTH, `备注留言不能超过${SUBMISSION_NOTE_MAX_LENGTH}个字符`).optional().nullable(),
   submissionNotePublic: z.boolean().optional(),
+  // 匿名投稿：勾选后非管理员视角不显示投稿人姓名
+  submissionAnonymous: z.boolean().optional(),
   preferredPlayTimeId: z.preprocess(
     (value) => value === null || value === undefined || value === '' ? null : Number(value),
     z.number().int().positive('播出时段 ID 无效').nullable()
@@ -495,6 +510,7 @@ export async function requestSongForUser(event: any, user: SongRequestUser, body
           submissionNote,
           submissionNotePublic,
           submissionNotePublicStatus,
+          submissionAnonymous: requestBody.submissionAnonymous === true,
           hitRequestId: hitRequestTime?.id || null
         })
         .returning()
@@ -562,7 +578,7 @@ export async function requestSongForUser(event: any, user: SongRequestUser, body
                 songId: newSong.id,
                 songTitle: newSong.title
               })
-            } catch (err) {
+            } catch (err: any) {
               console.error(`邀请用户 ${collaboratorId} 失败:`, err)
             }
           }
@@ -586,7 +602,7 @@ export async function requestSongForUser(event: any, user: SongRequestUser, body
               console.log(`[投稿时长] #${song.id} 已补齐时长 ${decision.durationSeconds}s`)
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error(`[投稿时长] 后台任务 #${song.id} 异常:`, err)
         }
       })()
@@ -594,6 +610,25 @@ export async function requestSongForUser(event: any, user: SongRequestUser, body
         event.waitUntil(durationValidationTask)
       } else {
         durationValidationTask.catch((err) => console.error(`[投稿时长] 后台任务 #${song.id} 异常:`, err))
+      }
+    }
+
+    if (song.submissionNotePublicStatus === SUBMISSION_NOTE_STATUS.PENDING) {
+      try {
+        const admins = await db.select({ id: users.id }).from(users).where(inArray(users.role, ['ADMIN', 'SUPER_ADMIN']))
+        if (admins.length > 0) {
+          await db.insert(notifications).values(
+            admins.map((a) => ({
+              userId: a.id,
+              type: 'SYSTEM_NOTICE',
+              title: '公开留言待审核',
+              message: `投稿歌曲《${song.title}》有一条公开留言待审核。`,
+              important: false
+            }))
+          )
+        }
+      } catch (e: any) {
+        console.error('公开留言待审核通知失败:', e)
       }
     }
 
@@ -605,9 +640,28 @@ export async function requestSongForUser(event: any, user: SongRequestUser, body
           notification.songId,
           notification.songTitle
         )
-      } catch (error) {
+      } catch (error: any) {
         console.error(`发送邀请通知给用户 ${notification.userId} 失败:`, error)
       }
+    }
+
+    // 群聊推送：谁点了什么歌。后台事件开关关闭或无群目标时该调用直接返回 0；
+    // 通知失败不得影响投稿结果。
+    // 匿名投稿不得在群聊里暴露姓名，否则匿名形同虚设。
+    try {
+      let displayName = '匿名'
+      if (song.submissionAnonymous !== true) {
+        const [requester] = await db.select({ name: users.name, username: users.username })
+          .from(users).where(eq(users.id, user.id)).limit(1)
+        displayName = requester?.name || requester?.username || `用户 ${user.id}`
+      }
+      await enqueueAstrbotGroupEvent(
+        'songRequest',
+        '新的点歌投稿',
+        `${displayName} 点了《${song.title}》- ${song.artist}`
+      )
+    } catch (error: any) {
+      console.error('发送群聊点歌通知失败:', error)
     }
 
     return song
@@ -644,7 +698,7 @@ async function getCurrentSemesterName() {
     }
 
     throw new Error('未设置活跃学期')
-  } catch (error) {
+  } catch (error: any) {
     console.error('获取当前学期失败:', error)
     throw error
   }

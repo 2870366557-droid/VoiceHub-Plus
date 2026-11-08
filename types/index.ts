@@ -1,13 +1,16 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
 export interface User {
   id: number
   username: string
   name: string | null
   grade?: string | null
   class?: string | null
-  role: 'USER' | 'ADMIN' | 'SUPER_ADMIN' | 'SONG_ADMIN'
+  role: 'USER' | 'ADMIN' | 'SUPER_ADMIN' | 'SONG_ADMIN' | 'BROADCASTER' | 'REVIEWER'
   lastLoginAt?: Date | null
   lastLoginIp?: string | null
   forcePasswordChange?: boolean
+  forceUsernameChange?: boolean
   passwordChangedAt?: Date | string | null
   requirePasswordChange?: boolean
   hasSetPassword?: boolean
@@ -50,6 +53,7 @@ export interface Song {
   createdAt: string
   voted?: boolean
   scheduled?: boolean
+  inPool?: boolean
   scheduleDate?: string
   schedulePlayed?: boolean
   cardCodeId?: number | null

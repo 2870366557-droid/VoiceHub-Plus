@@ -1,3 +1,8 @@
+/* Modified by YH-Chen-Eternity on 2026-10-23 */
+
+<!--
+Modified by YH-Chen on 2026-10-17
+-->
 <template>
   <div>
     <ClientOnly>
@@ -43,7 +48,7 @@
           </header>
 
           <div
-            class="flex-1 custom-scrollbar p-4 md:p-8 overflow-y-auto"
+            class="flex-1 min-h-0 custom-scrollbar p-4 md:p-8 overflow-y-auto"
           >
             <!-- 移动端返回顶部按钮 -->
             <button
@@ -61,6 +66,102 @@
               class="animate-in fade-in slide-in-from-bottom-4 duration-500"
             >
               <LazyAdminOverviewDashboard @navigate="handleNavigate" />
+            </div>
+
+            <!-- 审核：公开备注 -->
+            <div
+              v-if="activeTab === 'review-notes' && permissions.canAccessPage('review-notes')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminReviewManager mode="notes" />
+            </div>
+
+            <!-- 审核：用户（注册 / 改名 / 注销） -->
+            <div
+              v-if="activeTab === 'review-users' && permissions.canAccessPage('review-users')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminReviewManager mode="users" />
+            </div>
+
+            <!-- 审核：回声社区帖子 -->
+            <div
+              v-if="activeTab === 'community-review' && permissions.canAccessPage('community-review')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminCommunityReview />
+            </div>
+
+            <!-- 审核：回声社区评论 -->
+            <div
+              v-if="activeTab === 'community-comment-review' && permissions.canAccessPage('community-comment-review')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminCommunityCommentReview />
+            </div>
+
+            <!-- 回声社区：举报与申诉 -->
+            <div
+              v-if="activeTab === 'community-reports' && permissions.canAccessPage('community-reports')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminCommunityReports />
+            </div>
+
+            <!-- 回声社区：数据看板 -->
+            <div
+              v-if="activeTab === 'community-overview' && permissions.canAccessPage('community-overview')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminCommunityOverview />
+            </div>
+
+            <!-- 回声社区：归档记录 -->
+            <div
+              v-if="activeTab === 'community-archive' && permissions.canAccessPage('community-archive')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminCommunityArchive />
+            </div>
+
+            <!-- 内容管理：公告栏编辑 -->
+            <div
+              v-if="activeTab === 'announcement' && permissions.canAccessPage('announcement')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminAnnouncementManager />
+            </div>
+
+            <!-- 回声社区：板块管理 -->
+            <div
+              v-if="activeTab === 'community-boards' && permissions.canAccessPage('community-boards')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminCommunityBoards />
+            </div>
+
+            <!-- 回声社区：称号管理 -->
+            <div
+              v-if="activeTab === 'community-titles' && permissions.canAccessPage('community-titles')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminCommunityTitles />
+            </div>
+
+            <!-- 回声社区：用户与违规 -->
+            <div
+              v-if="activeTab === 'community-users' && permissions.canAccessPage('community-users')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminCommunityUsers />
+            </div>
+
+            <!-- 回声社区：配置 -->
+            <div
+              v-if="activeTab === 'community-settings' && permissions.canAccessPage('community-settings')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminCommunitySettings />
             </div>
 
             <!-- 歌曲管理 -->
@@ -111,7 +212,7 @@
               <LazyAdminNotificationSender />
             </div>
 
-            <!-- SMTP邮件配置 -->
+            <!-- 邮件与机器人推送配置 -->
             <div
               v-if="activeTab === 'smtp-config' && permissions.canAccessPage('smtp-config')"
               class="animate-in fade-in slide-in-from-bottom-4 duration-500"
@@ -197,6 +298,22 @@
             >
               <LazyAdminCardCodesManager />
             </div>
+
+            <!-- 系统看板 -->
+            <div
+              v-if="activeTab === 'system-board' && permissions.canAccessPage('system-board')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminSystemBoard />
+            </div>
+
+            <!-- 攻击日志 -->
+            <div
+              v-if="activeTab === 'attack-logs' && permissions.canAccessPage('attack-logs')"
+              class="animate-in fade-in slide-in-from-bottom-4 duration-500"
+            >
+              <LazyAdminAttackLogs />
+            </div>
           </div>
         </main>
       </div>
@@ -249,6 +366,7 @@ const registerBeforeNavigate = (hook) => {
 provide('registerBeforeNavigate', registerBeforeNavigate)
 
 // 服务
+const route = useRoute()
 let auth = null
 const permissions = usePermissions()
 
@@ -400,9 +518,12 @@ onMounted(async () => {
 
   currentUser.value = auth.user.value
 
-  // 设置默认页面
+  // 支持通过 ?tab= 直接打开指定栏目（社区入口跳转）
+  const queryTab = typeof route.query.tab === 'string' ? route.query.tab : ''
   const userPages = permissions.getUserPages.value
-  if (userPages.length > 0 && !userPages.includes(activeTab.value)) {
+  if (queryTab && userPages.includes(queryTab) && permissions.canAccessPage(queryTab)) {
+    activeTab.value = queryTab
+  } else if (userPages.length > 0 && !userPages.includes(activeTab.value)) {
     activeTab.value = userPages[0]
   }
 

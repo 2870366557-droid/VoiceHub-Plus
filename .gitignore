@@ -47,7 +47,41 @@ result
 .env
 .env.*
 !.env.example
+*.local
+.envrc
+
+# 证书 / 私钥 / 密钥文件（严禁入库）
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+*_rsa
+*.kdbx
+secrets/
+.secrets/
+credentials.json
+.cos.conf
+.npmrc.local
+
+# 备份 / 导出物（可能含数据库明文与密钥）
+*.dump
+*.sql.gz
+*.tar.gz
+*.zip
+backup/
 
 # Tencent Cloud EdgeOne
 .edgeone/*
 .tef_dist/*
+
+# 学校标识 / 校徽等品牌图片不随社区版发布
+public/images/校徽.png
+public/images/校徽.webp
+public/images/logo.png
+public/images/school-logo-light.png

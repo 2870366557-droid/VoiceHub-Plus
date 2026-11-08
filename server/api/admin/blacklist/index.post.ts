@@ -7,6 +7,7 @@ import {
   BLACKLIST_LANGUAGE_VALUES,
   BLACKLIST_GENRE_VALUES
 } from '~~/server/config/constants'
+import { invalidateSongBlacklistCache } from '~~/server/utils/songBlacklistMatch'
 
 export default defineEventHandler(async (event) => {
   // 检查认证和权限
@@ -77,12 +78,15 @@ export default defineEventHandler(async (event) => {
       })
       .returning()
 
+    // 后台配置已变更：立即使黑名单缓存失效，避免新规则要等缓存过期才生效
+    invalidateSongBlacklistCache()
+
     return {
       success: true,
       message: '黑名单项添加成功',
       item: blacklistItem[0]
     }
-  } catch (error) {
+  } catch (error: any) {
     if (error.statusCode) {
       throw error
     }

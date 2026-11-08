@@ -1,3 +1,6 @@
+<!--
+Modified by YH-Chen on 2026-10-17
+-->
 <template>
   <div class="request-form">
     <div class="rules-section desktop-only-rules">
@@ -471,7 +474,7 @@
                           v-model="submissionNotePublic"
                           type="checkbox"
                           class="custom-checkbox-input"
-                          :disabled="submissionNoteRequiresApproval || !siteConfigLoaded"
+                          :disabled="!siteConfigLoaded"
                         />
                         <span class="custom-checkbox-box">
                           <svg
@@ -505,6 +508,34 @@
                       <span class="truncate">{{ locale.submissionNoteApprovalHint }}</span>
                     </p>
                     <span class="shrink-0">{{ submissionNote.length }}/300</span>
+                  </div>
+
+                  <!-- 已选歌曲 + 确认投稿（与留言同一个框） -->
+                  <div class="mt-2.5 rounded-xl border border-border-secondary bg-bg-primary-40 p-2.5">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
+                      {{ t.requestConfirm.selectedSong }}
+                    </p>
+                    <p v-if="selectedSong" class="mt-0.5 truncate text-xs font-bold text-text-primary">
+                      {{ selectedSong.title }}
+                      <span class="font-normal text-text-tertiary"> — {{ selectedSong.artist }}</span>
+                    </p>
+                    <p v-else class="mt-0.5 text-[11px] text-text-tertiary">
+                      {{ t.requestConfirm.pickSongHint }}
+                    </p>
+                    <div class="mt-2 flex items-center justify-end gap-2">
+                      <button
+                        v-if="selectedSong"
+                        class="rounded-lg border border-border-secondary px-2.5 py-1.5 text-[11px] font-bold text-text-secondary transition-all hover:bg-bg-tertiary"
+                        type="button"
+                        @click="selectedSong = null"
+                      >{{ locale.cancel }}</button>
+                      <button
+                        :disabled="!selectedSong || submitting"
+                        class="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-black text-white transition-all hover:bg-primary-hover disabled:opacity-40"
+                        type="button"
+                        @click="submitSelectedSong"
+                      >{{ submitting ? locale.submitting : locale.confirmSubmit }}</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -605,6 +636,48 @@
                   </span>
                   <Icon :size="13" name="chevron-right" />
                 </button>
+              </div>
+            </div>
+
+            <!-- 投稿署名方式：匿名投稿 / 实名公开投稿（二选一） -->
+            <div class="form-row mb-4 anonymous-row">
+              <div class="anonymous-toggle-group">
+                <span class="anonymous-toggle-label">{{ locale.submissionIdentityLabel }}</span>
+                <div class="anonymous-toggle-options">
+                  <label
+                    :class="['anonymous-option', { 'is-active': !submissionAnonymous }]"
+                  >
+                    <input
+                      v-model="submissionAnonymous"
+                      class="anonymous-option-input"
+                      type="radio"
+                      name="submission-identity"
+                      :value="false"
+                      :disabled="!siteConfigLoaded"
+                    >
+                    <span class="anonymous-option-text">{{ locale.submissionIdentityPublic }}</span>
+                  </label>
+                  <label
+                    :class="['anonymous-option', { 'is-active': submissionAnonymous }]"
+                  >
+                    <input
+                      v-model="submissionAnonymous"
+                      class="anonymous-option-input"
+                      type="radio"
+                      name="submission-identity"
+                      :value="true"
+                      :disabled="!siteConfigLoaded"
+                    >
+                    <span class="anonymous-option-text">{{ locale.submissionIdentityAnonymous }}</span>
+                  </label>
+                </div>
+                <p class="anonymous-toggle-hint">
+                  {{
+                    submissionAnonymous
+                      ? locale.submissionIdentityAnonymousHint
+                      : locale.submissionIdentityPublicHint
+                  }}
+                </p>
               </div>
             </div>
 
@@ -728,7 +801,7 @@
                             !canSubmitFromSearch || isSongBlockedByRestriction(result) || submitting
                           "
                           class="select-btn"
-                          @click.stop.prevent="submitSong(result)"
+                          @click.stop.prevent="selectSongForSubmit(result)"
                         >
                           {{ locale.chooseSubmit }}
                         </button>
@@ -814,7 +887,7 @@
                             : ''
                         "
                         class="select-btn"
-                        @click.stop.prevent="submitSong(result)"
+                        @click.stop.prevent="selectSongForSubmit(result)"
                       >
                         {{
                           submitting
@@ -883,6 +956,7 @@
                 </div>
               </div>
             </Transition>
+
           </div>
         </div>
       </form>
@@ -1437,6 +1511,61 @@
         </div>
       </Transition>
     </Teleport>
+    <!-- 点赞署名选择：匿名 or 署名 + 是否记住该选择 -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div
+          v-if="pendingLikeSong"
+          class="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          @click.self="cancelLikeReveal"
+        >
+          <div class="w-full max-w-sm rounded-2xl border border-border-secondary bg-bg-primary p-5 shadow-2xl">
+            <h3 class="text-sm font-black text-text-primary">{{ t.voteReveal.title }}</h3>
+            <p class="mt-1 text-[11px] text-text-tertiary">{{ t.voteReveal.desc }}</p>
+            <div class="mt-4 space-y-2">
+              <button
+                class="w-full rounded-xl border px-3 py-2.5 text-left transition-all"
+                :class="likeRevealChoice === 'ANONYMOUS' ? 'border-primary bg-primary-10' : 'border-border-secondary hover:bg-bg-tertiary'"
+                type="button"
+                @click="likeRevealChoice = 'ANONYMOUS'"
+              >
+                <p class="text-xs font-bold text-text-primary">{{ t.voteReveal.anonymous }}</p>
+                <p class="mt-0.5 text-[10px] text-text-tertiary">{{ t.voteReveal.anonymousHint }}</p>
+              </button>
+              <button
+                class="w-full rounded-xl border px-3 py-2.5 text-left transition-all"
+                :class="likeRevealChoice === 'REVEAL' ? 'border-primary bg-primary-10' : 'border-border-secondary hover:bg-bg-tertiary'"
+                type="button"
+                @click="likeRevealChoice = 'REVEAL'"
+              >
+                <p class="text-xs font-bold text-text-primary">{{ t.voteReveal.reveal }}</p>
+                <p class="mt-0.5 text-[10px] text-text-tertiary">{{ t.voteReveal.revealHint }}</p>
+              </button>
+            </div>
+            <label class="mt-3 flex items-start gap-2 rounded-xl bg-bg-secondary-60 px-3 py-2 text-[11px] text-text-secondary">
+              <input v-model="rememberLikeReveal" class="mt-0.5 h-3.5 w-3.5 accent-[var(--primary)]" type="checkbox" >
+              <span class="min-w-0">
+                <span class="block font-bold">{{ t.voteReveal.remember }}</span>
+                <span class="mt-0.5 block text-text-tertiary">{{ t.voteReveal.rememberHint }}</span>
+              </span>
+            </label>
+            <div class="mt-4 flex gap-2">
+              <button
+                class="flex-1 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-white transition-all hover:bg-primary-hover"
+                type="button"
+                @click="confirmLikeReveal"
+              >{{ t.voteReveal.confirm }}</button>
+              <button
+                class="rounded-xl border border-border-secondary px-4 py-2.5 text-xs font-bold text-text-secondary transition-all hover:bg-bg-tertiary"
+                type="button"
+                @click="cancelLikeReveal"
+              >{{ t.voteReveal.cancel }}</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
     <!-- 隐藏的文件输入框 -->
     <input
       ref="fileInput"
@@ -1469,6 +1598,7 @@ import { useMusicSources } from '~/composables/useMusicSources'
 import { useAudioQuality } from '~/composables/useAudioQuality'
 import { usePlatformConfig } from '~/composables/usePlatformConfig'
 import { useLocale } from '~/utils/locale'
+import { useNewUi } from '~/composables/useNewUi'
 import CustomSelect from '~/components/UI/Common/CustomSelect.vue'
 import AppSpinner from '~/components/UI/Common/AppSpinner.vue'
 import Icon from '../UI/Icon.vue'
@@ -1500,6 +1630,7 @@ const props = defineProps({
 
 const emit = defineEmits(['request', 'vote'])
 const { songs: songsLocale } = useLocale()
+const t = useNewUi()
 const locale = computed(() => useSafeLocale(songsLocale.value?.requestForm || {}))
 const { t: callLocale } = useLocaleText(locale)
 const { localize: localizeServerError } = useServerErrors()
@@ -1542,6 +1673,8 @@ const platformTouched = ref(false) // 用户是否手动切换过平台，切换
 const preferredPlayTimeId = ref('')
 const submissionNote = ref('')
 const submissionNotePublic = ref(true)
+// 匿名投稿：勾选后非管理员看不到投稿人姓名（管理员后台仍可见）。默认实名公开。
+const submissionAnonymous = ref(false)
 const cardCode = ref('')
 const cardCodeDraft = ref('')
 const showCardCodeModal = ref(false)
@@ -1555,6 +1688,12 @@ const error = ref('')
 const success = ref('')
 const submitting = ref(false)
 const voting = ref(false)
+
+// 搜索结果点赞署名：ASK=每次询问（默认）/ ANONYMOUS / REVEAL
+const likeRevealMode = ref('ASK')
+const pendingLikeSong = ref(null)
+const likeRevealChoice = ref('ANONYMOUS')
+const rememberLikeReveal = ref(false)
 
 const {
   getAvailablePlatforms,
@@ -2632,6 +2771,7 @@ onMounted(async () => {
   fetchPlayTimes()
   initSiteConfig()
   fetchSubmissionStatus()
+  loadLikeRevealMode()
   // 获取当前学期和所有学期选项
   await Promise.all([fetchCurrentSemester(), fetchSemesterOptions()])
   // 只有在用户已登录时才加载歌曲列表以便检查相似歌曲
@@ -2744,7 +2884,11 @@ const handleEpisodeVote = async (episode) => {
   voting.value = true
 
   try {
-    await songService.voteSong(episode.songId)
+    // 透传署名选择：SongList 的「每次询问」弹窗会把 revealToRequester 随 vote 事件带出，
+    // 之前此处丢弃了该字段，导致在投稿流程里选「署名」实际仍是匿名。
+    await songService.voteSong(episode.songId, {
+      revealToRequester: episode?.revealToRequester === true
+    })
 
     // 只有在后端成功返回后才更新前端状态
     episode.voted = true
@@ -2800,6 +2944,48 @@ const getSimilarSong = (result) => {
   })
 }
 
+const loadLikeRevealMode = async () => {
+  if (!auth.isAuthenticated.value) return
+  try {
+    const res = await $fetch('/api/user/vote-reveal')
+    const mode = res?.data?.voteRevealMode
+    if (mode === 'ANONYMOUS' || mode === 'REVEAL' || mode === 'ASK') likeRevealMode.value = mode
+  } catch {
+    // 读取失败不阻塞点赞
+  }
+}
+
+const doLikeVote = async (song, reveal) => {
+  try {
+    await songService.voteSong(song.id, { revealToRequester: reveal === true })
+  } catch (error) {
+    console.error('点赞失败:', error)
+  }
+}
+
+const cancelLikeReveal = () => {
+  pendingLikeSong.value = null
+}
+
+const confirmLikeReveal = async () => {
+  const song = pendingLikeSong.value
+  if (!song) return
+  const reveal = likeRevealChoice.value === 'REVEAL'
+  pendingLikeSong.value = null
+  if (rememberLikeReveal.value) {
+    try {
+      await $fetch('/api/user/vote-reveal', {
+        method: 'PUT',
+        body: { voteRevealMode: reveal ? 'REVEAL' : 'ANONYMOUS' }
+      })
+      likeRevealMode.value = reveal ? 'REVEAL' : 'ANONYMOUS'
+    } catch {
+      if (window.$showNotification) window.$showNotification(t.value.voteReveal.saveFailed, 'error')
+    }
+  }
+  await doLikeVote(song, reveal)
+}
+
 // 从搜索结果中点赞已存在的歌曲
 const handleLikeFromSearch = async (song, originalResult = null) => {
   if (!song || song.voted) {
@@ -2814,7 +3000,14 @@ const handleLikeFromSearch = async (song, originalResult = null) => {
     return
   }
 
-  // 如果原始结果是多P视频，打开剧集选择弹窗
+  if (user.value && song.requesterId && Number(song.requesterId) === Number(user.value.id)) {
+    if (window.$showNotification) {
+      window.$showNotification(locale.value.selfLikeDisabled || t.value.voteReveal.selfLikeDisabled, 'warning')
+    }
+    return
+  }
+
+  // 如果原始结果是多P视频，打开剧集选择弹窗（弹窗内部自带署名选择）
   if (originalResult && isBilibiliMultiP(originalResult)) {
     selectedBilibiliVideo.value = originalResult
     bilibiliEpisodes.value = originalResult.pages
@@ -2823,11 +3016,14 @@ const handleLikeFromSearch = async (song, originalResult = null) => {
     return
   }
 
-  try {
-    await songService.voteSong(song.id)
-  } catch (error) {
-    console.error('点赞失败:', error)
+  if (likeRevealMode.value === 'ANONYMOUS' || likeRevealMode.value === 'REVEAL') {
+    await doLikeVote(song, likeRevealMode.value === 'REVEAL')
+    return
   }
+
+  likeRevealChoice.value = 'ANONYMOUS'
+  rememberLikeReveal.value = false
+  pendingLikeSong.value = song
 }
 
 // 平台切换函数
@@ -3457,6 +3653,21 @@ const resolveSubmissionDuration = async (result, actualMusicPlatform, fallbackUr
 }
 
 // 提交选中的歌曲
+// 选歌 + 确认投稿：写留言与选歌不分先后，选好后点底部「确认投稿」提交
+const selectedSong = ref(null)
+const selectSongForSubmit = (result) => {
+  selectedSong.value = result
+  if (typeof window !== 'undefined' && window.$showNotification) {
+    window.$showNotification(`已选择《${result?.title || ''}》，填写好留言后点底部「确认投稿」`, 'success')
+  }
+}
+const submitSelectedSong = async () => {
+  const target = selectedSong.value
+  if (!target || submitting.value) return
+  selectedSong.value = null
+  await submitSong(target)
+}
+
 const submitSong = async (result, options = {}) => {
   // 防止重复点击和重复提交
   if (submitting.value) return
@@ -3674,6 +3885,7 @@ const submitSong = async (result, options = {}) => {
       durationSeconds: submissionDurationSeconds,
       submissionNote: submissionNote.value.trim() || null,
       submissionNotePublic: submissionNotePublic.value,
+      submissionAnonymous: submissionAnonymous.value,
       collaborators: collaborators.value.map((u) => u.id),
       bilibiliCid: bilibiliCid || null,
       bilibiliPage: bilibiliPage
@@ -3732,6 +3944,7 @@ const handleSubmit = async () => {
       musicId: null, // 手动输入时没有musicId
       submissionNote: submissionNote.value.trim() || null,
       submissionNotePublic: submissionNotePublic.value,
+      submissionAnonymous: submissionAnonymous.value,
       collaborators: collaborators.value.map((u) => u.id)
     }
     if (cardCode.value && cardCode.value.trim()) {
@@ -3957,7 +4170,9 @@ const handleAlbumSongVote = async (song) => {
 
   voting.value = true
   try {
-    await songService.voteSong(song.songId)
+    await songService.voteSong(song.songId, {
+      revealToRequester: song?.revealToRequester === true
+    })
 
     if (window.$showNotification) {
       window.$showNotification(locale.value.notifications.likeSuccess, 'success')
@@ -4122,7 +4337,8 @@ const handleManualSubmit = async () => {
       musicPlatform: hasManualPlayUrl ? null : platform.value,
       musicId: null, // 手动输入时没有musicId
       submissionNote: submissionNote.value.trim() || null,
-      submissionNotePublic: submissionNotePublic.value
+      submissionNotePublic: submissionNotePublic.value,
+      submissionAnonymous: submissionAnonymous.value
     }
 
     if (cardCode.value && cardCode.value.trim()) {
@@ -4162,6 +4378,7 @@ const resetForm = () => {
   collaborators.value = []
   submissionNote.value = ''
   submissionNotePublic.value = true
+  submissionAnonymous.value = false
   cardCode.value = ''
   cardCodeDraft.value = ''
   showCardCodeModal.value = false
@@ -4686,13 +4903,23 @@ defineExpose({
 .collaborator-tag {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
   background: var(--color-accent-alpha-10);
   border: 1px solid var(--color-accent-alpha-20);
   border-radius: 6px;
   padding: 0.25rem 0.5rem;
   font-size: 14px;
   color: var(--text-primary);
+}
+
+/* 姓名截断：窄屏下标签不会把页面撑出横向滚动 */
+.collaborator-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .remove-collaborator {
@@ -4922,6 +5149,67 @@ defineExpose({
 
 .submission-meta-row {
   align-items: stretch;
+}
+
+/* 匿名投稿 / 实名公开投稿 二选一 */
+.anonymous-row {
+  align-items: stretch;
+}
+
+.anonymous-toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  width: 100%;
+}
+
+.anonymous-toggle-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.anonymous-toggle-options {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.anonymous-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border-secondary, var(--panel-bg-deep));
+  border-radius: 9999px;
+  background: var(--panel-bg-overlay);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.anonymous-option:hover {
+  border-color: var(--primary-50, var(--text-secondary));
+}
+
+.anonymous-option.is-active {
+  border-color: var(--primary-50, var(--text-secondary));
+  background: var(--primary-10, var(--panel-bg-overlay));
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.anonymous-option-input {
+  accent-color: var(--primary-50, currentColor);
+  margin: 0;
+}
+
+.anonymous-toggle-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin: 0;
 }
 
 .submission-note-group,
